@@ -32,7 +32,8 @@ import tools.jackson.databind.ObjectMapper;
  */
 public final class JdkGitLabClient implements GitLabClient {
 
-    private static final int PAGE_SIZE = 100;
+    private static final int DEFAULT_PAGE_SIZE = 100;
+    private static final int DIFF_PAGE_SIZE = 30;
     private static final TypeReference<List<DiffVersionDto>> VERSION_LIST = new TypeReference<>() { };
     private static final TypeReference<List<DiffFileDto>> DIFF_LIST = new TypeReference<>() { };
     private static final TypeReference<List<DiscussionDto>> DISCUSSION_LIST = new TypeReference<>() { };
@@ -97,7 +98,7 @@ public final class JdkGitLabClient implements GitLabClient {
     public PageResult<DiffFile> getDiffs(MergeRequestRef reference, Set<String> paths, String cursor) {
         int page = decodeCursor(cursor);
         GitLabHttpResponse response = get(withQuery(
-                mrUri(reference, "/diffs"), "per_page=" + PAGE_SIZE + "&page=" + page));
+                mrUri(reference, "/diffs"), "per_page=" + DIFF_PAGE_SIZE + "&page=" + page));
         List<DiffFileDto> values = read(response, DIFF_LIST);
         long remaining = properties.getMaxDiffSize().toBytes();
         boolean truncated = false;
@@ -173,7 +174,7 @@ public final class JdkGitLabClient implements GitLabClient {
     public PageResult<Discussion> getDiscussions(MergeRequestRef reference, String cursor) {
         int page = decodeCursor(cursor);
         GitLabHttpResponse response = get(withQuery(
-                mrUri(reference, "/discussions"), "per_page=" + PAGE_SIZE + "&page=" + page));
+                mrUri(reference, "/discussions"), "per_page=" + DEFAULT_PAGE_SIZE + "&page=" + page));
         List<Discussion> discussions = read(response, DISCUSSION_LIST).stream().map(mapper::discussion).toList();
         String nextPage = response.headers().firstValue("X-Next-Page").filter(value -> !value.isBlank()).orElse(null);
         return new PageResult<>(

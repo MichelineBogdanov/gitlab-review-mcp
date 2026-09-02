@@ -83,7 +83,7 @@ class JdkGitLabClientIntegrationTest {
         server.stubFor(get(urlEqualTo(mrPath() + "/versions?per_page=100"))
                 .willReturn(okJson("[{\"id\":3,\"base_commit_sha\":\"base\","
                         + "\"start_commit_sha\":\"start\",\"head_commit_sha\":\"head\",\"future\":1}]")));
-        server.stubFor(get(urlEqualTo(mrPath() + "/diffs?per_page=100&page=1"))
+        server.stubFor(get(urlEqualTo(mrPath() + "/diffs?per_page=30&page=1"))
                 .willReturn(okJson("[{\"old_path\":\"src/A.java\",\"new_path\":\"src/A.java\","
                         + "\"diff\":\"@@ -1 +1 @@\\n-old\\n+new\\n\",\"new_file\":false,"
                         + "\"renamed_file\":false,\"deleted_file\":false,\"unknown\":true}]")));
@@ -110,9 +110,9 @@ class JdkGitLabClientIntegrationTest {
 
     @Test
     void followsPaginationAndPostsInlineDiscussionWithCompletePosition() {
-        server.stubFor(get(urlEqualTo(mrPath() + "/diffs?per_page=100&page=1"))
+        server.stubFor(get(urlEqualTo(mrPath() + "/diffs?per_page=30&page=1"))
                 .willReturn(okJson("[]").withHeader("X-Next-Page", "2")));
-        server.stubFor(get(urlEqualTo(mrPath() + "/diffs?per_page=100&page=2"))
+        server.stubFor(get(urlEqualTo(mrPath() + "/diffs?per_page=30&page=2"))
                 .willReturn(okJson("[]")));
         server.stubFor(post(urlEqualTo(mrPath() + "/discussions"))
                 .willReturn(okJson("{\"id\":\"discussion-2\",\"notes\":[{\"id\":22}]}")));
