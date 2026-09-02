@@ -220,6 +220,24 @@ Jira и Confluence остаются контекстом Codex и не пере�
 
 ## Архитектура
 
+Упрощённая схема взаимодействия компонентов:
+
+```mermaid
+flowchart LR
+    User[Пользователь] <-->|preview и approval| Codex[Codex Desktop / CLI]
+    Codex <-->|JSON-RPC через STDIO| Mcp[MCP tool adapters]
+    Mcp --> Application[Application services]
+
+    Application --> GitLabPort[GitLabClient port]
+    GitLabPort --> RestAdapter[JDK HttpClient adapter]
+    RestAdapter --> GitLab[(GitLab REST API v4)]
+
+    Application --> ProposalPort[ReviewProposalRepository port]
+    ProposalPort --> Memory[(In-memory proposals)]
+```
+
+Read tools проходят по цепочке до GitLab API. `gitlab_prepare_review` проверяет комментарии и сохраняет proposal только в памяти. `gitlab_publish_review` обращается к GitLab после показа preview и явного approval пользователя.
+
 Подробная схема и правила зависимостей: [`docs/architecture.md`](docs/architecture.md).
 
 ## Разработка и безопасность
