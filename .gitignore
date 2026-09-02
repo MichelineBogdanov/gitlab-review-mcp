@@ -1,0 +1,10 @@
+target/
+.idea/
+*.iml
+.env
+*.jks
+*.p12
+*.pfx
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: gitlab-review-mcp
+  config:
+    import: "optional:file:./.env[extension=.properties][encoding=utf-8]"
+  main:
+    web-application-type: none
+    banner-mode: "off"
+  ai:
+    mcp:
+      server:
+        name: gitlab-review-mcp
+        version: "@project.version@"
+        type: SYNC
+        stdio: true
+        instructions: >-
+          Read tools may be called automatically. Always show the complete prepared review
+          preview before invoking gitlab_publish_review. Publishing requires explicit user approval.
+        capabilities:
+          resource: false
+          prompt: false
+          completion: false
+
+logging:
+  level:
+    root: WARN
+    ru.bogdanov.gitlabreviewmcp: INFO
