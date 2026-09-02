@@ -8,6 +8,7 @@
 - Maven 3.6.3+;
 - Spring Boot 4.1.1;
 - Spring AI 2.0.1;
+- MapStruct 1.6.3;
 - GitLab 17.2.1 и новее.
 
 ## Граница публикации

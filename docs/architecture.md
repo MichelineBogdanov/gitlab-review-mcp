@@ -27,7 +27,7 @@ flowchart LR
 
 - `domain` — proposal aggregate, sealed comment hierarchy, atomic publication state;
 - `application` — use cases, validation, digest and ports;
-- `infrastructure.gitlab` — URL policy, DTO mapping, bounded HTTP, retry and TLS;
+- `infrastructure.gitlab` — URL policy, generated MapStruct DTO mapping, bounded HTTP, retry and TLS;
 - `infrastructure.proposal` — bounded process-local storage with TTL cleanup;
 - `infrastructure.mcp` — annotated tool boundary and structured errors;
 - `configuration` — validated Spring configuration and composition root.

@@ -4,6 +4,7 @@ import java.net.http.HttpClient;
 import java.security.SecureRandom;
 import java.time.Clock;
 import javax.net.ssl.SSLContext;
+import org.mapstruct.factory.Mappers;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import ru.bogdanov.gitlabreviewmcp.application.DiffPositionValidator;
@@ -73,7 +74,7 @@ public class ApplicationConfiguration {
     /** @return GitLab DTO mapper */
     @Bean
     GitLabDtoMapper gitLabDtoMapper() {
-        return new GitLabDtoMapper();
+        return Mappers.getMapper(GitLabDtoMapper.class);
     }
 
     /**

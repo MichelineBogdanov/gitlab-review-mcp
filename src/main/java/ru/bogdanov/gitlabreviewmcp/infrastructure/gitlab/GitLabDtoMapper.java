@@ -2,6 +2,10 @@ package ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab;
 
 import java.net.URI;
 import java.util.List;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.Named;
+import org.mapstruct.ReportingPolicy;
 import ru.bogdanov.gitlabreviewmcp.application.model.DiffFile;
 import ru.bogdanov.gitlabreviewmcp.application.model.DiffVersion;
 import ru.bogdanov.gitlabreviewmcp.application.model.Discussion;
@@ -12,67 +16,122 @@ import ru.bogdanov.gitlabreviewmcp.application.model.MergeRequestDetails;
 import ru.bogdanov.gitlabreviewmcp.domain.MergeRequestRef;
 
 /**
- * Maps tolerant GitLab wire DTOs to application models.
+ * Maps tolerant GitLab wire DTOs to application models using generated code.
  */
-public final class GitLabDtoMapper {
+@Mapper(unmappedTargetPolicy = ReportingPolicy.ERROR)
+public interface GitLabDtoMapper {
 
-    /** @param value wire DTO @return application user */
-    public GitLabUser user(UserDto value) {
-        return value == null ? null : new GitLabUser(value.id(), value.username(), value.name(), uri(value.webUrl()));
-    }
+    /**
+     * Maps a GitLab user.
+     *
+     * @param value wire DTO
+     * @return application user
+     */
+    GitLabUser user(UserDto value);
 
-    /** @param reference trusted reference @param value wire DTO @param requestId request ID @return metadata */
-    public MergeRequestDetails mergeRequest(MergeRequestRef reference, MergeRequestDto value, String requestId) {
-        return new MergeRequestDetails(
-                reference,
-                value.title(),
-                value.description(),
-                value.state(),
-                value.sourceBranch(),
-                value.targetBranch(),
-                value.sha(),
-                user(value.author()),
-                uri(value.webUrl()),
-                requestId);
-    }
+    /**
+     * Maps merge request metadata while retaining its trusted parsed reference.
+     *
+     * @param reference trusted reference
+     * @param value wire DTO
+     * @param requestId GitLab request identifier
+     * @return merge request metadata
+     */
+    @Mapping(target = "reference", source = "reference")
+    @Mapping(target = "title", source = "value.title")
+    @Mapping(target = "description", source = "value.description")
+    @Mapping(target = "state", source = "value.state")
+    @Mapping(target = "sourceBranch", source = "value.sourceBranch")
+    @Mapping(target = "targetBranch", source = "value.targetBranch")
+    @Mapping(target = "headSha", source = "value.sha")
+    @Mapping(target = "author", source = "value.author")
+    @Mapping(target = "webUrl", source = "value.webUrl")
+    @Mapping(target = "gitLabRequestId", source = "requestId")
+    MergeRequestDetails mergeRequest(MergeRequestRef reference, MergeRequestDto value, String requestId);
 
-    /** @param value wire DTO @return diff version */
-    public DiffVersion version(DiffVersionDto value) {
-        return new DiffVersion(value.id(), value.baseSha(), value.startSha(), value.headSha());
-    }
+    /**
+     * Maps a diff version.
+     *
+     * @param value wire DTO
+     * @return diff version
+     */
+    DiffVersion version(DiffVersionDto value);
 
-    /** @param value wire DTO @param truncated local truncation flag @return changed file */
-    public DiffFile diff(DiffFileDto value, boolean truncated) {
-        return new DiffFile(
-                value.oldPath(), value.newPath(), value.diff() == null ? "" : value.diff(), truth(value.newFile()),
-                truth(value.renamedFile()), truth(value.deletedFile()), truth(value.generatedFile()),
-                truth(value.collapsed()), truth(value.tooLarge()),
-                truncated);
-    }
+    /**
+     * Maps a changed file and attaches the local truncation state.
+     *
+     * @param value wire DTO
+     * @param truncated local truncation flag
+     * @return changed file
+     */
+    @Mapping(target = "diff", source = "value.diff", defaultValue = "")
+    @Mapping(target = "newFile", source = "value.newFile", qualifiedByName = "truth")
+    @Mapping(target = "renamedFile", source = "value.renamedFile", qualifiedByName = "truth")
+    @Mapping(target = "deletedFile", source = "value.deletedFile", qualifiedByName = "truth")
+    @Mapping(target = "generatedFile", source = "value.generatedFile", qualifiedByName = "truth")
+    @Mapping(target = "collapsed", source = "value.collapsed", qualifiedByName = "truth")
+    @Mapping(target = "tooLarge", source = "value.tooLarge", qualifiedByName = "truth")
+    @Mapping(target = "truncated", source = "truncated")
+    DiffFile diff(DiffFileDto value, boolean truncated);
 
-    /** @param value wire DTO @return discussion */
-    public Discussion discussion(DiscussionDto value) {
-        List<DiscussionNote> notes = value.notes() == null ? List.of() : value.notes().stream().map(this::note).toList();
-        return new Discussion(value.id(), truth(value.individualNote()), notes);
-    }
+    /**
+     * Maps a discussion and all of its replies.
+     *
+     * @param value wire DTO
+     * @return discussion
+     */
+    @Mapping(target = "individualNote", source = "individualNote", qualifiedByName = "truth")
+    @Mapping(target = "notes", source = "notes", qualifiedByName = "notes")
+    Discussion discussion(DiscussionDto value);
 
-    private DiscussionNote note(NoteDto value) {
-        return new DiscussionNote(
-                value.id(), value.body(), user(value.author()), value.createdAt(), truth(value.system()),
-                truth(value.resolvable()), truth(value.resolved()), position(value.position()));
-    }
+    /**
+     * Maps one note or reply.
+     *
+     * @param value wire DTO
+     * @return discussion note
+     */
+    @Mapping(target = "system", source = "system", qualifiedByName = "truth")
+    @Mapping(target = "resolvable", source = "resolvable", qualifiedByName = "truth")
+    @Mapping(target = "resolved", source = "resolved", qualifiedByName = "truth")
+    DiscussionNote note(NoteDto value);
 
-    private DiscussionPosition position(PositionDto value) {
-        return value == null ? null : new DiscussionPosition(
-                value.oldPath(), value.newPath(), value.oldLine(), value.newLine(), value.baseSha(), value.startSha(),
-                value.headSha());
-    }
+    /**
+     * Maps an optional inline position.
+     *
+     * @param value wire DTO
+     * @return discussion position or {@code null}
+     */
+    DiscussionPosition position(PositionDto value);
 
-    private URI uri(String value) {
+    /**
+     * Converts an optional GitLab URL.
+     *
+     * @param value URL text
+     * @return parsed URL or {@code null}
+     */
+    default URI uri(String value) {
         return value == null || value.isBlank() ? null : URI.create(value);
     }
 
-    private boolean truth(Boolean value) {
+    /**
+     * Normalizes nullable GitLab boolean values.
+     *
+     * @param value nullable value
+     * @return {@code true} only for {@link Boolean#TRUE}
+     */
+    @Named("truth")
+    default boolean truth(Boolean value) {
         return Boolean.TRUE.equals(value);
+    }
+
+    /**
+     * Normalizes a nullable GitLab notes collection.
+     *
+     * @param values wire notes
+     * @return immutable mapped notes
+     */
+    @Named("notes")
+    default List<DiscussionNote> notes(List<NoteDto> values) {
+        return values == null ? List.of() : values.stream().map(this::note).toList();
     }
 }

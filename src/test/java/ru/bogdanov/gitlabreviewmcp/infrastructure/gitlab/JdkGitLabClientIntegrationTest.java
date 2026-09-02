@@ -22,6 +22,7 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mapstruct.factory.Mappers;
 import org.springframework.util.unit.DataSize;
 import ru.bogdanov.gitlabreviewmcp.application.GitLabClientException;
 import ru.bogdanov.gitlabreviewmcp.application.model.DiffVersion;
@@ -61,7 +62,7 @@ class JdkGitLabClientIntegrationTest {
                         .findAndAddModules()
                         .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                         .build(),
-                new GitLabDtoMapper());
+                Mappers.getMapper(GitLabDtoMapper.class));
         reference = new MergeRequestRef(
                 URI.create(baseUrl + "/group/project/-/merge_requests/7"), "group/project", 7);
     }
