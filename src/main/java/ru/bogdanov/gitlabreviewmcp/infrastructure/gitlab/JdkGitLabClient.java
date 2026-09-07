@@ -2,6 +2,9 @@ package ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab;
 
 import java.net.URI;
 import java.net.URLEncoder;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -16,11 +19,16 @@ import ru.bogdanov.gitlabreviewmcp.application.model.Discussion;
 import ru.bogdanov.gitlabreviewmcp.application.model.GitLabConnectionInfo;
 import ru.bogdanov.gitlabreviewmcp.application.model.MergeRequestDetails;
 import ru.bogdanov.gitlabreviewmcp.application.model.PageResult;
+import ru.bogdanov.gitlabreviewmcp.application.model.ProjectDetails;
+import ru.bogdanov.gitlabreviewmcp.application.model.RepositoryFileContent;
+import ru.bogdanov.gitlabreviewmcp.application.model.RepositorySearchResult;
+import ru.bogdanov.gitlabreviewmcp.application.model.RepositoryTreeEntry;
 import ru.bogdanov.gitlabreviewmcp.application.port.GitLabClient;
 import ru.bogdanov.gitlabreviewmcp.configuration.GitLabProperties;
 import ru.bogdanov.gitlabreviewmcp.domain.DiffSide;
 import ru.bogdanov.gitlabreviewmcp.domain.InlineReviewComment;
 import ru.bogdanov.gitlabreviewmcp.domain.MergeRequestRef;
+import ru.bogdanov.gitlabreviewmcp.domain.ProjectRef;
 import ru.bogdanov.gitlabreviewmcp.domain.PublicationReceipt;
 import ru.bogdanov.gitlabreviewmcp.domain.ReviewCommentDraft;
 import tools.jackson.core.JacksonException;
@@ -34,9 +42,12 @@ public final class JdkGitLabClient implements GitLabClient {
 
     private static final int DEFAULT_PAGE_SIZE = 100;
     private static final int DIFF_PAGE_SIZE = 30;
+    private static final int SEARCH_PAGE_SIZE = 20;
     private static final TypeReference<List<DiffVersionDto>> VERSION_LIST = new TypeReference<>() { };
     private static final TypeReference<List<DiffFileDto>> DIFF_LIST = new TypeReference<>() { };
     private static final TypeReference<List<DiscussionDto>> DISCUSSION_LIST = new TypeReference<>() { };
+    private static final TypeReference<List<RepositoryTreeEntryDto>> TREE_ENTRY_LIST = new TypeReference<>() { };
+    private static final TypeReference<List<RepositorySearchResultDto>> SEARCH_RESULT_LIST = new TypeReference<>() { };
 
     private final GitLabProperties properties;
     private final GitLabHttpTransport transport;
@@ -75,8 +86,110 @@ public final class JdkGitLabClient implements GitLabClient {
                 "OK",
                 version.version(),
                 userDto.username(),
-                Set.of("READ_MERGE_REQUEST", "READ_DIFF", "READ_DISCUSSIONS", "PUBLISH_DISCUSSIONS"),
+                Set.of(
+                        "READ_PROJECT",
+                        "READ_REPOSITORY_TREE",
+                        "READ_REPOSITORY_FILE",
+                        "SEARCH_REPOSITORY_CODE",
+                        "READ_MERGE_REQUEST",
+                        "READ_DIFF",
+                        "READ_DISCUSSIONS",
+                        "PUBLISH_DISCUSSIONS"),
                 requestId(userResponse));
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public ProjectDetails getProject(ProjectRef reference) {
+        GitLabHttpResponse response = get(projectUri(reference, ""));
+        return mapper.project(reference, read(response, ProjectDto.class), requestId(response));
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public PageResult<RepositoryTreeEntry> getRepositoryTree(
+            ProjectRef reference, String path, boolean recursive, String cursor) {
+        int page = decodeCursor(cursor);
+        String normalizedPath = normalizeRepositoryPath(path, true);
+        StringBuilder query = new StringBuilder("per_page=")
+                .append(DEFAULT_PAGE_SIZE)
+                .append("&page=")
+                .append(page)
+                .append("&recursive=")
+                .append(recursive);
+        if (!normalizedPath.isEmpty()) {
+            query.append("&path=").append(encode(normalizedPath));
+        }
+        GitLabHttpResponse response = get(withQuery(projectUri(reference, "/repository/tree"), query.toString()));
+        List<RepositoryTreeEntry> entries = read(response, TREE_ENTRY_LIST).stream()
+                .map(mapper::repositoryTreeEntry)
+                .toList();
+        return pageResult(entries, response);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public RepositoryFileContent getRepositoryFile(
+            ProjectRef reference, String filePath, Integer startLine, Integer lineCount) {
+        String normalizedPath = normalizeRepositoryPath(filePath, false);
+        int firstLine = startLine == null ? 1 : startLine;
+        int requestedLines = lineCount == null ? properties.getMaxFileLinesPerRequest() : lineCount;
+        if (firstLine < 1) {
+            throw invalidInput("startLine must be positive");
+        }
+        if (requestedLines < 1 || requestedLines > properties.getMaxFileLinesPerRequest()) {
+            throw invalidInput("lineCount must be between 1 and " + properties.getMaxFileLinesPerRequest());
+        }
+        GitLabHttpResponse response = get(withQuery(
+                projectUri(reference, "/repository/files/" + encode(normalizedPath)), "ref=HEAD"));
+        RepositoryFileDto value = read(response, RepositoryFileDto.class);
+        byte[] decoded = decodeFile(value, response);
+        if (decoded.length > properties.getMaxFileSize().toBytes()) {
+            throw new GitLabClientException(
+                    "REPOSITORY_FILE_TOO_LARGE",
+                    "Repository file exceeds the configured file size limit",
+                    null,
+                    requestId(response),
+                    false);
+        }
+        String text = decodeUtf8(decoded, response);
+        List<String> lines = text.isEmpty() ? List.of() : text.lines().toList();
+        if (!lines.isEmpty() && firstLine > lines.size()) {
+            throw invalidInput("startLine exceeds the file line count");
+        }
+        int startIndex = lines.isEmpty() ? 0 : firstLine - 1;
+        int endIndex = Math.min(lines.size(), startIndex + requestedLines);
+        String content = String.join("\n", lines.subList(startIndex, endIndex));
+        int returnedStartLine = lines.isEmpty() ? 0 : firstLine;
+        int returnedEndLine = lines.isEmpty() ? 0 : endIndex;
+        Integer nextStartLine = endIndex < lines.size() ? endIndex + 1 : null;
+        return mapper.repositoryFile(
+                value,
+                lines.size(),
+                returnedStartLine,
+                returnedEndLine,
+                content,
+                nextStartLine,
+                requestId(response));
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public PageResult<RepositorySearchResult> searchRepositoryCode(
+            ProjectRef reference, String query, String cursor) {
+        String normalizedQuery = query == null ? "" : query.strip();
+        if (normalizedQuery.isEmpty() || normalizedQuery.length() > properties.getMaxSearchQueryLength()) {
+            throw invalidInput("Search query must contain between 1 and "
+                    + properties.getMaxSearchQueryLength() + " characters");
+        }
+        int page = decodeCursor(cursor);
+        String parameters = "scope=blobs&search=" + encode(normalizedQuery)
+                + "&per_page=" + SEARCH_PAGE_SIZE + "&page=" + page;
+        GitLabHttpResponse response = get(withQuery(projectUri(reference, "/search"), parameters));
+        List<RepositorySearchResult> results = read(response, SEARCH_RESULT_LIST).stream()
+                .map(mapper::repositorySearchResult)
+                .toList();
+        return pageResult(results, response);
     }
 
     /** {@inheritDoc} */
@@ -280,6 +393,10 @@ public final class JdkGitLabClient implements GitLabClient {
         return uri("/projects/" + encode(reference.projectPath()) + "/merge_requests/" + reference.iid() + suffix);
     }
 
+    private URI projectUri(ProjectRef reference, String suffix) {
+        return uri("/projects/" + encode(reference.projectPath()) + suffix);
+    }
+
     private URI uri(String apiPath) {
         return URI.create(apiRoot + apiPath);
     }
@@ -296,6 +413,71 @@ public final class JdkGitLabClient implements GitLabClient {
 
     private String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    private <T> PageResult<T> pageResult(List<T> items, GitLabHttpResponse response) {
+        String nextPage = response.headers().firstValue("X-Next-Page").filter(value -> !value.isBlank()).orElse(null);
+        return new PageResult<>(
+                items,
+                nextPage == null ? null : encodeCursor(Integer.parseInt(nextPage)),
+                false,
+                List.of(),
+                requestId(response));
+    }
+
+    private String normalizeRepositoryPath(String value, boolean optional) {
+        if (value == null || value.isBlank()) {
+            if (optional) {
+                return "";
+            }
+            throw invalidInput("Repository file path is required");
+        }
+        String normalized = value.strip();
+        if (normalized.startsWith("/") || normalized.endsWith("/") || normalized.contains("\\")) {
+            throw invalidInput("Repository path must be relative and use forward slashes");
+        }
+        for (String segment : normalized.split("/", -1)) {
+            if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
+                throw invalidInput("Repository path contains an invalid segment");
+            }
+        }
+        return normalized;
+    }
+
+    private byte[] decodeFile(RepositoryFileDto value, GitLabHttpResponse response) {
+        if (!"base64".equalsIgnoreCase(value.encoding()) || value.content() == null) {
+            throw invalidGitLabFile(response, "GitLab returned an unsupported repository file encoding");
+        }
+        try {
+            return Base64.getMimeDecoder().decode(value.content());
+        } catch (IllegalArgumentException exception) {
+            throw invalidGitLabFile(response, "GitLab returned malformed repository file content");
+        }
+    }
+
+    private String decodeUtf8(byte[] value, GitLabHttpResponse response) {
+        try {
+            String text = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(value))
+                    .toString();
+            if (text.indexOf('\0') >= 0) {
+                throw invalidGitLabFile(response, "Binary repository files are not supported");
+            }
+            return text;
+        } catch (CharacterCodingException exception) {
+            throw invalidGitLabFile(response, "Repository file is not valid UTF-8 text");
+        }
+    }
+
+    private GitLabClientException invalidGitLabFile(GitLabHttpResponse response, String message) {
+        return new GitLabClientException(
+                "UNSUPPORTED_REPOSITORY_FILE", message, response.statusCode(), requestId(response), false);
+    }
+
+    private GitLabClientException invalidInput(String message) {
+        return new GitLabClientException("INVALID_INPUT", message, null, null, false);
     }
 
     private String requestId(GitLabHttpResponse response) {

@@ -14,8 +14,9 @@ spring:
         type: SYNC
         stdio: true
         instructions: >-
-          Read tools may be called automatically. Always show the complete prepared review
-          preview before invoking gitlab_publish_review. Publishing requires explicit user approval.
+          Use only the tools exposed by the configured server mode. Read tools may be called automatically.
+          In REVIEW mode, always show the complete prepared review preview before invoking
+          gitlab_publish_review. Publishing requires explicit user approval.
         capabilities:
           resource: false
           prompt: false

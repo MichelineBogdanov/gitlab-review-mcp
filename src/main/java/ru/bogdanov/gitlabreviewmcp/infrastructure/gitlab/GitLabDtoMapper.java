@@ -13,7 +13,12 @@ import ru.bogdanov.gitlabreviewmcp.application.model.DiscussionNote;
 import ru.bogdanov.gitlabreviewmcp.application.model.DiscussionPosition;
 import ru.bogdanov.gitlabreviewmcp.application.model.GitLabUser;
 import ru.bogdanov.gitlabreviewmcp.application.model.MergeRequestDetails;
+import ru.bogdanov.gitlabreviewmcp.application.model.ProjectDetails;
+import ru.bogdanov.gitlabreviewmcp.application.model.RepositoryFileContent;
+import ru.bogdanov.gitlabreviewmcp.application.model.RepositorySearchResult;
+import ru.bogdanov.gitlabreviewmcp.application.model.RepositoryTreeEntry;
 import ru.bogdanov.gitlabreviewmcp.domain.MergeRequestRef;
+import ru.bogdanov.gitlabreviewmcp.domain.ProjectRef;
 
 /**
  * Maps tolerant GitLab wire DTOs to application models using generated code.
@@ -28,6 +33,67 @@ public interface GitLabDtoMapper {
      * @return application user
      */
     GitLabUser user(UserDto value);
+
+    /**
+     * Maps project metadata while retaining its trusted parsed reference.
+     *
+     * @param reference trusted reference
+     * @param value wire DTO
+     * @param requestId GitLab request identifier
+     * @return project metadata
+     */
+    @Mapping(target = "reference", source = "reference")
+    @Mapping(target = "id", source = "value.id")
+    @Mapping(target = "name", source = "value.name")
+    @Mapping(target = "nameWithNamespace", source = "value.nameWithNamespace")
+    @Mapping(target = "description", source = "value.description")
+    @Mapping(target = "defaultBranch", source = "value.defaultBranch")
+    @Mapping(target = "archived", source = "value.archived", qualifiedByName = "truth")
+    @Mapping(target = "emptyRepo", source = "value.emptyRepo", qualifiedByName = "truth")
+    @Mapping(target = "lastActivityAt", source = "value.lastActivityAt")
+    @Mapping(target = "gitLabRequestId", source = "requestId")
+    ProjectDetails project(ProjectRef reference, ProjectDto value, String requestId);
+
+    /** @param value wire DTO @return repository tree entry */
+    RepositoryTreeEntry repositoryTreeEntry(RepositoryTreeEntryDto value);
+
+    /** @param value wire DTO @return code search result */
+    @Mapping(target = "startLine", source = "startLine", defaultValue = "0")
+    RepositorySearchResult repositorySearchResult(RepositorySearchResultDto value);
+
+    /**
+     * Maps decoded and bounded repository file content.
+     *
+     * @param value wire DTO
+     * @param totalLines total file lines
+     * @param startLine returned first line
+     * @param endLine returned last line
+     * @param content returned content slice
+     * @param nextStartLine next line or {@code null}
+     * @param requestId GitLab request identifier
+     * @return bounded repository file
+     */
+    @Mapping(target = "fileName", source = "value.fileName")
+    @Mapping(target = "filePath", source = "value.filePath")
+    @Mapping(target = "ref", source = "value.ref")
+    @Mapping(target = "blobId", source = "value.blobId")
+    @Mapping(target = "commitId", source = "value.commitId")
+    @Mapping(target = "lastCommitId", source = "value.lastCommitId")
+    @Mapping(target = "size", source = "value.size")
+    @Mapping(target = "totalLines", source = "totalLines")
+    @Mapping(target = "startLine", source = "startLine")
+    @Mapping(target = "endLine", source = "endLine")
+    @Mapping(target = "content", source = "content")
+    @Mapping(target = "nextStartLine", source = "nextStartLine")
+    @Mapping(target = "gitLabRequestId", source = "requestId")
+    RepositoryFileContent repositoryFile(
+            RepositoryFileDto value,
+            int totalLines,
+            int startLine,
+            int endLine,
+            String content,
+            Integer nextStartLine,
+            String requestId);
 
     /**
      * Maps merge request metadata while retaining its trusted parsed reference.

@@ -17,7 +17,9 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +32,7 @@ import ru.bogdanov.gitlabreviewmcp.configuration.GitLabProperties;
 import ru.bogdanov.gitlabreviewmcp.domain.DiffSide;
 import ru.bogdanov.gitlabreviewmcp.domain.InlineReviewComment;
 import ru.bogdanov.gitlabreviewmcp.domain.MergeRequestRef;
+import ru.bogdanov.gitlabreviewmcp.domain.ProjectRef;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -38,6 +41,7 @@ class JdkGitLabClientIntegrationTest {
     private WireMockServer server;
     private JdkGitLabClient client;
     private MergeRequestRef reference;
+    private ProjectRef projectReference;
 
     @BeforeEach
     void setUp() {
@@ -50,6 +54,7 @@ class JdkGitLabClientIntegrationTest {
         properties.setReadTimeout(Duration.ofSeconds(2));
         properties.setMaxResponseSize(DataSize.ofMegabytes(1));
         properties.setMaxDiffSize(DataSize.ofMegabytes(1));
+        properties.setMaxFileSize(DataSize.ofKilobytes(512));
         properties.setMaxRetries(1);
         GitLabHttpTransport raw = new JdkGitLabHttpTransport(
                 HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build(),
@@ -65,6 +70,7 @@ class JdkGitLabClientIntegrationTest {
                 Mappers.getMapper(GitLabDtoMapper.class));
         reference = new MergeRequestRef(
                 URI.create(baseUrl + "/group/project/-/merge_requests/7"), "group/project", 7);
+        projectReference = new ProjectRef(URI.create(baseUrl + "/group/project"), "group/project");
     }
 
     @AfterEach
@@ -106,6 +112,60 @@ class JdkGitLabClientIntegrationTest {
         server.verify(getRequestedFor(urlPathEqualTo("/api/v4/user"))
                 .withHeader("PRIVATE-TOKEN", equalTo("test-token")));
         server.verify(0, getRequestedFor(urlPathEqualTo(mrPath() + "/changes")));
+    }
+
+    @Test
+    void readsProjectTreeFileSlicesAndCodeSearchFromDefaultBranch() {
+        server.stubFor(get(urlEqualTo(projectPath()))
+                .willReturn(okJson("{\"id\":8,\"name\":\"project\","
+                        + "\"name_with_namespace\":\"Group / Project\",\"description\":\"Service\","
+                        + "\"default_branch\":\"main\",\"archived\":false,\"empty_repo\":false,"
+                        + "\"last_activity_at\":\"2026-09-01T12:00:00Z\",\"future\":true}")
+                        .withHeader("X-Request-Id", "project-request")));
+        server.stubFor(get(urlEqualTo(projectPath()
+                        + "/repository/tree?per_page=100&page=1&recursive=false&path=src%2Fmain"))
+                .willReturn(okJson("[{\"id\":\"tree-sha\",\"name\":\"java\",\"type\":\"tree\","
+                        + "\"path\":\"src/main/java\",\"mode\":\"040000\",\"future\":true}]")
+                        .withHeader("X-Next-Page", "2")));
+        String encodedContent = Base64.getEncoder().encodeToString(
+                "line 1\nline 2\nline 3\nline 4\n".getBytes(StandardCharsets.UTF_8));
+        server.stubFor(get(urlEqualTo(projectPath() + "/repository/files/src%2FMain.java?ref=HEAD"))
+                .willReturn(okJson("{\"file_name\":\"Main.java\",\"file_path\":\"src/Main.java\","
+                        + "\"size\":28,\"encoding\":\"base64\",\"content\":\"" + encodedContent + "\","
+                        + "\"ref\":\"main\",\"blob_id\":\"blob\",\"commit_id\":\"commit\","
+                        + "\"last_commit_id\":\"last\",\"future\":true}")
+                        .withHeader("X-Request-Id", "file-request")));
+        server.stubFor(get(urlEqualTo(projectPath()
+                        + "/search?scope=blobs&search=OrderService%20extension%3Ajava&per_page=20&page=1"))
+                .willReturn(okJson("[{\"path\":\"src/OrderService.java\",\"ref\":\"main\","
+                        + "\"startline\":42,\"data\":\"class OrderService\",\"future\":true}]")));
+
+        var project = client.getProject(projectReference);
+        var tree = client.getRepositoryTree(projectReference, "src/main", false, null);
+        var file = client.getRepositoryFile(projectReference, "src/Main.java", 2, 2);
+        var search = client.searchRepositoryCode(projectReference, "OrderService extension:java", null);
+
+        assertThat(project.defaultBranch()).isEqualTo("main");
+        assertThat(project.gitLabRequestId()).isEqualTo("project-request");
+        assertThat(tree.items().getFirst().path()).isEqualTo("src/main/java");
+        assertThat(tree.nextCursor()).isNotBlank();
+        assertThat(file.content()).isEqualTo("line 2\nline 3");
+        assertThat(file.startLine()).isEqualTo(2);
+        assertThat(file.endLine()).isEqualTo(3);
+        assertThat(file.totalLines()).isEqualTo(4);
+        assertThat(file.nextStartLine()).isEqualTo(4);
+        assertThat(file.gitLabRequestId()).isEqualTo("file-request");
+        assertThat(search.items().getFirst().startLine()).isEqualTo(42);
+        assertThat(search.items().getFirst().path()).isEqualTo("src/OrderService.java");
+    }
+
+    @Test
+    void rejectsInvalidRepositoryPathsBeforeSendingRequest() {
+        assertThatThrownBy(() -> client.getRepositoryFile(projectReference, "../secret", null, null))
+                .isInstanceOfSatisfying(GitLabClientException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("INVALID_INPUT"));
+
+        server.verify(0, getRequestedFor(urlPathEqualTo(projectPath() + "/repository/files/..%2Fsecret")));
     }
 
     @Test
@@ -188,6 +248,10 @@ class JdkGitLabClientIntegrationTest {
 
     private String mrPath() {
         return "/api/v4/projects/group%2Fproject/merge_requests/7";
+    }
+
+    private String projectPath() {
+        return "/api/v4/projects/group%2Fproject";
     }
 
     private String userJson() {

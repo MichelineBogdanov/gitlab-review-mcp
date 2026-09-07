@@ -2,21 +2,15 @@ package ru.bogdanov.gitlabreviewmcp.infrastructure.mcp;
 
 import java.util.List;
 import java.util.Set;
-import java.util.function.Supplier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
-import ru.bogdanov.gitlabreviewmcp.application.GitLabClientException;
-import ru.bogdanov.gitlabreviewmcp.application.GitLabConnectionService;
 import ru.bogdanov.gitlabreviewmcp.application.MergeRequestQueryService;
-import ru.bogdanov.gitlabreviewmcp.application.ReviewApplicationException;
 import ru.bogdanov.gitlabreviewmcp.application.ReviewPreparationService;
 import ru.bogdanov.gitlabreviewmcp.application.ReviewPublicationService;
 import ru.bogdanov.gitlabreviewmcp.application.model.DiffFile;
 import ru.bogdanov.gitlabreviewmcp.application.model.Discussion;
-import ru.bogdanov.gitlabreviewmcp.application.model.GitLabConnectionInfo;
 import ru.bogdanov.gitlabreviewmcp.application.model.MergeRequestDetails;
 import ru.bogdanov.gitlabreviewmcp.application.model.PageResult;
 import ru.bogdanov.gitlabreviewmcp.application.model.PreparedReview;
@@ -27,42 +21,32 @@ import ru.bogdanov.gitlabreviewmcp.domain.ReviewCommentDraft;
  * Thin MCP adapter exposing the review application use cases.
  */
 @Component
+@ConditionalOnProperty(
+        prefix = "gitlab-review-mcp", name = "mode", havingValue = "REVIEW", matchIfMissing = true)
 public final class GitLabReviewTools {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(GitLabReviewTools.class);
-
-    private final GitLabConnectionService connectionService;
     private final MergeRequestQueryService queryService;
     private final ReviewPreparationService preparationService;
     private final ReviewPublicationService publicationService;
+    private final McpToolExecutor executor;
 
     /**
      * Creates the tool adapter.
      *
-     * @param connectionService connection diagnostics
      * @param queryService merge request queries
      * @param preparationService review preparation
      * @param publicationService approved publication
+     * @param executor safe tool executor
      */
     public GitLabReviewTools(
-            GitLabConnectionService connectionService,
             MergeRequestQueryService queryService,
             ReviewPreparationService preparationService,
-            ReviewPublicationService publicationService) {
-        this.connectionService = connectionService;
+            ReviewPublicationService publicationService,
+            McpToolExecutor executor) {
         this.queryService = queryService;
         this.preparationService = preparationService;
         this.publicationService = publicationService;
-    }
-
-    /** @return structured GitLab connection diagnostics */
-    @McpTool(
-            name = "gitlab_check_connection",
-            description = "Checks the configured GitLab version and authenticated user without changing GitLab.",
-            annotations = @McpTool.McpAnnotations(
-                    readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
-    public ToolResponse<GitLabConnectionInfo> checkConnection() {
-        return execute(connectionService::checkConnection);
+        this.executor = executor;
     }
 
     /**
@@ -79,7 +63,7 @@ public final class GitLabReviewTools {
     public ToolResponse<MergeRequestDetails> getMergeRequest(
             @McpToolParam(required = true, description = "Full merge request URL on the configured GitLab origin")
             String mergeRequestUrl) {
-        return execute(() -> queryService.getMergeRequest(mergeRequestUrl));
+        return executor.execute(() -> queryService.getMergeRequest(mergeRequestUrl));
     }
 
     /**
@@ -100,7 +84,7 @@ public final class GitLabReviewTools {
             String mergeRequestUrl,
             @McpToolParam(required = false, description = "Optional repository-relative paths") Set<String> paths,
             @McpToolParam(required = false, description = "Opaque cursor from the previous diff response") String cursor) {
-        return execute(() -> queryService.getDiffs(mergeRequestUrl, paths, cursor));
+        return executor.execute(() -> queryService.getDiffs(mergeRequestUrl, paths, cursor));
     }
 
     /**
@@ -120,7 +104,7 @@ public final class GitLabReviewTools {
             String mergeRequestUrl,
             @McpToolParam(required = false, description = "Opaque cursor from the previous discussion response")
             String cursor) {
-        return execute(() -> queryService.getDiscussions(mergeRequestUrl, cursor));
+        return executor.execute(() -> queryService.getDiscussions(mergeRequestUrl, cursor));
     }
 
     /**
@@ -141,7 +125,7 @@ public final class GitLabReviewTools {
             String mergeRequestUrl,
             @McpToolParam(required = true, description = "GENERAL or INLINE comments to include in the preview")
             List<ReviewCommentInput> comments) {
-        return execute(() -> {
+        return executor.execute(() -> {
             if (comments == null) {
                 throw new IllegalArgumentException("Comments are required");
             }
@@ -168,22 +152,6 @@ public final class GitLabReviewTools {
             String proposalId,
             @McpToolParam(required = true, description = "Digest displayed in the approved preview")
             String expectedDigest) {
-        return execute(() -> publicationService.publish(proposalId, expectedDigest));
-    }
-
-    private <T> ToolResponse<T> execute(Supplier<T> operation) {
-        try {
-            return ToolResponse.success(operation.get());
-        } catch (GitLabClientException exception) {
-            return ToolResponse.failure(new ToolError(
-                    exception.code(), exception.getMessage(), exception.httpStatus(), exception.gitLabRequestId()));
-        } catch (ReviewApplicationException exception) {
-            return ToolResponse.failure(new ToolError(exception.code(), exception.getMessage(), null, null));
-        } catch (IllegalArgumentException | NullPointerException exception) {
-            return ToolResponse.failure(new ToolError("INVALID_INPUT", exception.getMessage(), null, null));
-        } catch (RuntimeException exception) {
-            LOGGER.error("Unexpected MCP tool failure: {}", exception.getClass().getSimpleName());
-            return ToolResponse.failure(new ToolError("INTERNAL_ERROR", "Unexpected internal error", null, null));
-        }
+        return executor.execute(() -> publicationService.publish(proposalId, expectedDigest));
     }
 }

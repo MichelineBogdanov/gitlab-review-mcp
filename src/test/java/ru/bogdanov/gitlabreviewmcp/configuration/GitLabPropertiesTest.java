@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.URI;
 import org.junit.jupiter.api.Test;
+import org.springframework.util.unit.DataSize;
 
 class GitLabPropertiesTest {
 
@@ -34,5 +35,19 @@ class GitLabPropertiesTest {
         properties.setToken("token");
 
         assertThat(properties.isValid()).isFalse();
+    }
+
+    @Test
+    void reservesResponseCapacityForBase64FileContentAndJsonMetadata() {
+        GitLabProperties properties = new GitLabProperties();
+        properties.setBaseUrl(URI.create("https://gitlab.example.com"));
+        properties.setToken("token");
+        properties.setMaxResponseSize(DataSize.ofMegabytes(2));
+        properties.setMaxFileSize(DataSize.ofMegabytes(2));
+
+        assertThat(properties.isValid()).isFalse();
+
+        properties.setMaxFileSize(DataSize.ofMegabytes(1));
+        assertThat(properties.isValid()).isTrue();
     }
 }

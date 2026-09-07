@@ -1,6 +1,6 @@
 # GitLab Review MCP
 
-Локальный STDIO MCP-сервер для чтения и ревью merge requests в self-hosted GitLab. Сервер работает как узкий прокси между Codex и GitLab REST API v4: он не клонирует repository, не меняет локальные файлы и не предоставляет операции merge, push, approve или resolve.
+Локальный STDIO MCP-сервер с изолированными режимами для ревью merge requests и чтения кодовой базы в self-hosted GitLab. Сервер не клонирует repository и не меняет repository content.
 
 Целевой runtime:
 
@@ -11,7 +11,24 @@
 - MapStruct 1.6.3;
 - GitLab 17.2.1 и новее.
 
-## Граница публикации
+## Режимы работы
+
+Один процесс работает только в одном режиме, заданном в `.env`:
+
+```properties
+gitlab-review-mcp.mode=REVIEW
+```
+
+| Режим | Кодовая база | Доступные операции |
+|---|---|---|
+| `REVIEW` | Локальный workspace читает сам Codex | MR metadata, diff, discussions, prepare и publish review |
+| `REPOSITORY` | Current default branch читается через GitLab API | Project metadata, tree, UTF-8 files и blob search; write-tools отсутствуют |
+
+`REVIEW` используется по умолчанию для обратной совместимости. В `REPOSITORY` review tools не регистрируются и отсутствуют в MCP `tools/list`, поэтому аналитический агент технически не может подготовить или опубликовать review. В `REVIEW` remote repository tools аналогично отсутствуют: MCP получает MR и комментарии из GitLab, а исходный код и локальные изменения агент читает из workspace Codex.
+
+Неизвестное значение режима останавливает сервер с configuration error.
+
+## Граница публикации в REVIEW
 
 Чтение MR выполняется автоматически. Публикация ревью разделена на две операции:
 
@@ -23,14 +40,18 @@ Proposal живёт 15 минут по умолчанию и теряется п
 
 ## MCP tools
 
-| Tool | Операция |
-|---|---|
-| `gitlab_check_connection` | Проверяет `/version`, `/user`, minimum GitLab version и PAT |
-| `gitlab_get_merge_request` | Возвращает metadata и current head SHA |
-| `gitlab_get_merge_request_diff` | Возвращает bounded page изменённых файлов и unified diff |
-| `gitlab_get_merge_request_discussions` | Возвращает discussions, replies, positions и resolved state |
-| `gitlab_prepare_review` | Проверяет comments и сохраняет immutable preview в памяти |
-| `gitlab_publish_review` | Публикует ранее подготовленный proposal |
+| Tool | Режим | Операция |
+|---|---|---|
+| `gitlab_check_connection` | Оба | Проверяет `/version`, `/user`, minimum GitLab version, PAT и capabilities активного режима |
+| `gitlab_get_project` | `REPOSITORY` | Возвращает metadata проекта и current default branch |
+| `gitlab_get_repository_tree` | `REPOSITORY` | Возвращает bounded page дерева current default branch |
+| `gitlab_get_repository_file` | `REPOSITORY` | Читает bounded range строк UTF-8 файла из current default branch |
+| `gitlab_search_repository_code` | `REPOSITORY` | Ищет по именам и содержимому файлов через GitLab blob search |
+| `gitlab_get_merge_request` | `REVIEW` | Возвращает metadata и current head SHA |
+| `gitlab_get_merge_request_diff` | `REVIEW` | Возвращает bounded page изменённых файлов и unified diff |
+| `gitlab_get_merge_request_discussions` | `REVIEW` | Возвращает discussions, replies, positions и resolved state |
+| `gitlab_prepare_review` | `REVIEW` | Проверяет comments и сохраняет immutable preview в памяти |
+| `gitlab_publish_review` | `REVIEW` | Публикует ранее подготовленный proposal |
 
 MR принимается только полным URL на настроенном GitLab origin:
 
@@ -38,7 +59,65 @@ MR принимается только полным URL на настроенн�
 https://gitlab.example.com/group/project/-/merge_requests/123
 ```
 
+Repository tools принимают полный URL корня проекта:
+
+```text
+https://gitlab.example.com/group/project
+```
+
+Они читают текущее состояние default branch через GitLab API. Локальный checkout и незакоммиченные изменения не учитываются. Для чтения файла используется GitLab `HEAD`, который разрешается в default branch проекта; commit SHA или branch от пользователя не требуется.
+
 Scheme, host, effective port и GitLab URL prefix должны совпадать с `gitlab.base-url`. Project path кодируется сервером. Redirect на другой origin или за пределы настроенного prefix отклоняется до отправки PAT.
+
+## Установка из GitHub Release
+
+Для запуска достаточно Java 21; Maven на машине пользователя не требуется.
+
+1. Откройте GitHub Release `latest` и скачайте один из вариантов:
+   - `gitlab-review-mcp.jar` и `.env.example` — standalone installation;
+   - `gitlab-review-mcp-latest.zip` — JAR, `.env.example` и README.
+2. Создайте отдельный каталог и поместите в него JAR.
+3. Скопируйте `.env.example` в `.env` и заполните `gitlab-review-mcp.mode`, `gitlab.base-url` и `gitlab.token`.
+4. Укажите абсолютный путь к JAR в `args`, а созданный каталог — в `cwd` конфигурации MCP.
+5. Перезапустите агент и вызовите `gitlab_check_connection`.
+
+Пример структуры установленного сервера:
+
+```text
+C:\Tools\gitlab-review-mcp\
+├── gitlab-review-mcp.jar
+└── .env
+```
+
+Пример минимальной безопасной конфигурации Codex для `REVIEW`:
+
+```toml
+[mcp_servers.gitlab_review]
+command = "java"
+args = ["-jar", "C:\\Tools\\gitlab-review-mcp\\gitlab-review-mcp.jar"]
+cwd = "C:\\Tools\\gitlab-review-mcp"
+enabled = true
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+default_tools_approval_mode = "auto"
+enabled_tools = [
+  "gitlab_check_connection",
+  "gitlab_get_merge_request",
+  "gitlab_get_merge_request_diff",
+  "gitlab_get_merge_request_discussions",
+  "gitlab_prepare_review",
+  "gitlab_publish_review"
+]
+
+[mcp_servers.gitlab_review.tools.gitlab_publish_review]
+approval_mode = "prompt"
+```
+
+Для `REPOSITORY` используйте отдельную read-only конфигурацию из соответствующего раздела ниже. Файл `SHA256SUMS.txt` содержит SHA-256 checksums release assets. Например, JAR можно проверить в PowerShell:
+
+```powershell
+Get-FileHash .\gitlab-review-mcp.jar -Algorithm SHA256
+```
 
 ## Сборка
 
@@ -56,15 +135,37 @@ target/gitlab-review-mcp.jar
 
 `verify` запускает unit-тесты, WireMock contract tests, ArchUnit, packaged STDIO integration tests, JaCoCo, Javadoc doclint и Checkstyle. Maven Wrapper намеренно не добавлен.
 
+## GitHub Actions и rolling release
+
+Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+
+- для pull request запускает `mvn clean verify`;
+- при push в `master` собирает и проверяет проект;
+- упаковывает standalone JAR и ZIP bundle;
+- атомарно перемещает tag `latest` на проверенный commit;
+- создаёт release `latest` или обновляет его assets с заменой предыдущих файлов.
+
+Release публикуется встроенным `GITHUB_TOKEN`; отдельный PAT или repository secret не требуется. Job публикации имеет только `contents: write`, остальные jobs работают с `contents: read`.
+
+Перед первым push проверьте настройки GitHub repository:
+
+1. GitHub Actions разрешены в `Settings` → `Actions` → `General`.
+2. Организационная policy не запрещает `contents: write` для `GITHUB_TOKEN`.
+3. Ruleset/tag protection разрешает GitHub Actions перемещать tag `latest`.
+4. Immutable releases отключены: rolling release по определению должен заменять tag и assets.
+
+После успешного push в `master` результат появится в `Actions`, а готовые файлы — в release `latest`. Если нужен неизменяемый журнал версий, вместо rolling release следует публиковать отдельные tags вида `v1.2.3`.
+
 ## Personal Access Token
 
 Создайте отдельный PAT в настройках своей учётной записи GitLab:
 
-- scope: `api`;
+- `REVIEW`: scope `api`, поскольку сервер публикует discussions;
+- `REPOSITORY`: scope `read_api`, без write-доступа;
 - короткий срок действия;
 - понятное имя, например `gitlab-review-mcp-local`.
 
-Scope `api` нужен как для чтения MR, так и для создания discussions. Не добавляйте token в Codex config, JVM arguments или Git history.
+Для аналитиков рекомендуется отдельный read-only PAT. Не добавляйте token в Codex config, JVM arguments или Git history.
 
 ## `.env`
 
@@ -77,6 +178,7 @@ Copy-Item .env.example .env
 Минимальная конфигурация:
 
 ```properties
+gitlab-review-mcp.mode=REVIEW
 gitlab.base-url=https://gitlab.example.com
 gitlab.token=replace-me
 ```
@@ -113,9 +215,9 @@ gitlab.ssl.trust-store-type=PKCS12
 
 Truststores (`*.jks`, `*.p12`, `*.pfx`) исключены из Git.
 
-## Подключение к Codex Desktop и CLI
+## Подключение REVIEW к Codex Desktop и CLI
 
-Сначала соберите JAR, затем добавьте сервер в Codex `config.toml`:
+Установите `gitlab-review-mcp.mode=REVIEW` в `.env`, соберите JAR и добавьте сервер в Codex `config.toml`:
 
 ```toml
 [mcp_servers.gitlab_review]
@@ -142,6 +244,37 @@ enabled_tools = [
 approval_mode = "prompt"
 ```
 
+## Подключение REPOSITORY к Codex Desktop и CLI
+
+Для аналитической установки задайте в `.env`:
+
+```properties
+gitlab-review-mcp.mode=REPOSITORY
+```
+
+Используйте отдельное имя MCP server и только read-only allowlist:
+
+```toml
+[mcp_servers.gitlab_repository]
+command = "java"
+args = [
+  "-jar",
+  "C:\\absolute\\path\\gitlab-review-mcp\\target\\gitlab-review-mcp.jar"
+]
+cwd = "C:\\absolute\\path\\gitlab-review-mcp"
+enabled = true
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+default_tools_approval_mode = "auto"
+enabled_tools = [
+  "gitlab_check_connection",
+  "gitlab_get_project",
+  "gitlab_get_repository_tree",
+  "gitlab_get_repository_file",
+  "gitlab_search_repository_code"
+]
+```
+
 `cwd` должен указывать на корень проекта, потому что `.env` загружается относительно working directory. Локальные STDIO servers и per-tool approval настраиваются средствами [Codex MCP configuration](https://developers.openai.com/codex/mcp/).
 
 После изменения конфигурации перезапустите Codex Desktop. Проверка:
@@ -151,6 +284,27 @@ codex mcp list
 ```
 
 В Desktop список доступен через `/mcp`. После успешного подключения вызовите `gitlab_check_connection`.
+
+## Сценарий: анализ удалённой кодовой базы
+
+Передайте Codex полный URL проекта и сформулируйте вопрос о текущей реализации. Агент:
+
+1. получает metadata и имя default branch через `gitlab_get_project`;
+2. ищет классы, методы или конфигурацию через `gitlab_search_repository_code`;
+3. при необходимости обходит каталоги через `gitlab_get_repository_tree`;
+4. читает релевантные файлы частями через `gitlab_get_repository_file`;
+5. формирует ответ только по состоянию удалённого default branch.
+
+Пример запроса:
+
+```text
+Используй gitlab_repository и проверь проект
+https://gitlab.example.com/group/project.
+Объясни, как сейчас реализован расчёт лимитов и где он конфигурируется.
+Ничего не публикуй и не изменяй.
+```
+
+`gitlab_search_repository_code` использует GitLab project search с `scope=blobs`. Доступность и качество поиска зависят от конфигурации поиска на GitLab instance. Если search недоступен, агент может найти файлы через постраничный обход tree.
 
 ## Сценарий: доработка собственного MR
 
@@ -197,6 +351,9 @@ Jira и Confluence остаются контекстом Codex и не пере�
 - 500 changed files;
 - 10 MB на JSON response;
 - 5 MB diff content на page;
+- 2 MB на читаемый repository file;
+- 500 строк файла на один tool call;
+- 500 символов в code search query;
 - 100 proposals в памяти;
 - TTL proposal 15 минут.
 
@@ -236,7 +393,7 @@ flowchart LR
     ProposalPort --> Memory[(In-memory proposals)]
 ```
 
-Read tools проходят по цепочке до GitLab API. `gitlab_prepare_review` проверяет комментарии и сохраняет proposal только в памяти. `gitlab_publish_review` обращается к GitLab после показа preview и явного approval пользователя.
+Project и MR read tools проходят по цепочке до GitLab API. Repository tools читают default branch напрямую через Project, Repository Tree, Repository Files и Search API без локального checkout. `gitlab_prepare_review` проверяет комментарии и сохраняет proposal только в памяти. `gitlab_publish_review` обращается к GitLab после показа preview и явного approval пользователя.
 
 Подробная схема и правила зависимостей: [`docs/architecture.md`](docs/architecture.md).
 

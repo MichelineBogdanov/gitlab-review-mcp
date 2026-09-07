@@ -1,15 +1,17 @@
-name: CI
+name: Build and release
 
 on:
   push:
-    branches: ["main"]
+    branches: ["master"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  verify:
+  build:
+    name: Verify and package
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -26,6 +28,34 @@ jobs:
       - name: Verify
         run: mvn --batch-mode --no-transfer-progress clean verify
 
+      - name: Prepare distribution
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        shell: bash
+        run: |
+          mkdir -p dist/gitlab-review-mcp
+          cp target/gitlab-review-mcp.jar dist/gitlab-review-mcp.jar
+          cp target/gitlab-review-mcp.jar dist/gitlab-review-mcp/gitlab-review-mcp.jar
+          cp .env.example dist/gitlab-review-mcp/.env.example
+          cp .env.example dist/.env.example
+          cp README.md dist/gitlab-review-mcp/README.md
+          cd dist
+          zip -r gitlab-review-mcp-latest.zip gitlab-review-mcp
+          sha256sum gitlab-review-mcp.jar gitlab-review-mcp-latest.zip .env.example > SHA256SUMS.txt
+
+      - name: Upload distribution artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitlab-review-mcp-distribution
+          path: |
+            dist/gitlab-review-mcp.jar
+            dist/gitlab-review-mcp-latest.zip
+            dist/.env.example
+            dist/SHA256SUMS.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
@@ -35,3 +65,86 @@ jobs:
             target/surefire-reports
             target/failsafe-reports
           if-no-files-found: ignore
+          retention-days: 7
+
+  release:
+    name: Update latest release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: gitlab-review-mcp-latest-release
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download distribution artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gitlab-review-mcp-distribution
+          path: dist
+
+      - name: Update rolling release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: latest
+        run: |
+          set -euo pipefail
+
+          git fetch origin "+refs/heads/master:refs/remotes/origin/master"
+          if [[ "$(git rev-parse origin/master)" != "$GITHUB_SHA" ]]; then
+            echo "A newer master commit exists; skipping stale release update."
+            exit 0
+          fi
+
+          if gh release view "$RELEASE_TAG" --json isImmutable >/tmp/release.json 2>/dev/null; then
+            if [[ "$(jq -r '.isImmutable' /tmp/release.json)" == "true" ]]; then
+              echo "The rolling release is immutable. Disable immutable releases or use versioned tags."
+              exit 1
+            fi
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --force "$RELEASE_TAG" "$GITHUB_SHA"
+          git push --force origin "refs/tags/$RELEASE_TAG"
+
+          short_sha="${GITHUB_SHA:0:7}"
+          repository_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          printf '%s\n' \
+            "Rolling build from [\`${short_sha}\`](${repository_url}/commit/${GITHUB_SHA})." \
+            "" \
+            "Requires Java 21. Download either the standalone JAR or the ZIP bundle." \
+            "Place a configured \`.env\` next to the JAR and use that directory as the MCP \`cwd\`." \
+            "See the bundled README for REVIEW and REPOSITORY mode configuration." \
+            > /tmp/release-notes.md
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --title "Latest build (${short_sha})" \
+              --notes-file /tmp/release-notes.md \
+              --target "$GITHUB_SHA" \
+              --latest
+            gh release upload "$RELEASE_TAG" \
+              dist/gitlab-review-mcp.jar \
+              dist/gitlab-review-mcp-latest.zip \
+              dist/.env.example \
+              dist/SHA256SUMS.txt \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              dist/gitlab-review-mcp.jar \
+              dist/gitlab-review-mcp-latest.zip \
+              dist/.env.example \
+              dist/SHA256SUMS.txt \
+              --verify-tag \
+              --title "Latest build (${short_sha})" \
+              --notes-file /tmp/release-notes.md \
+              --latest

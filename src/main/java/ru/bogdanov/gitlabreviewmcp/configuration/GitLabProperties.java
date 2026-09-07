@@ -18,6 +18,8 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "gitlab")
 public final class GitLabProperties {
 
+    private static final long REPOSITORY_FILE_RESPONSE_OVERHEAD_BYTES = 64 * 1024;
+
     @NotNull
     private URI baseUrl;
 
@@ -36,7 +38,14 @@ public final class GitLabProperties {
     @NotNull
     private DataSize maxDiffSize = DataSize.ofMegabytes(5);
 
+    @NotNull
+    private DataSize maxFileSize = DataSize.ofMegabytes(2);
+
     private int maxFiles = 500;
+
+    private int maxFileLinesPerRequest = 500;
+
+    private int maxSearchQueryLength = 500;
 
     private int maxRetries = 2;
 
@@ -103,6 +112,16 @@ public final class GitLabProperties {
         this.maxDiffSize = maxDiffSize;
     }
 
+    /** @return maximum decoded repository file size */
+    public DataSize getMaxFileSize() {
+        return maxFileSize;
+    }
+
+    /** @param maxFileSize maximum decoded repository file size */
+    public void setMaxFileSize(DataSize maxFileSize) {
+        this.maxFileSize = maxFileSize;
+    }
+
     /** @return maximum changed files collected by an aggregate request */
     public int getMaxFiles() {
         return maxFiles;
@@ -111,6 +130,26 @@ public final class GitLabProperties {
     /** @param maxFiles maximum changed files collected by an aggregate request */
     public void setMaxFiles(int maxFiles) {
         this.maxFiles = maxFiles;
+    }
+
+    /** @return maximum file lines returned by one tool call */
+    public int getMaxFileLinesPerRequest() {
+        return maxFileLinesPerRequest;
+    }
+
+    /** @param maxFileLinesPerRequest maximum file lines returned by one tool call */
+    public void setMaxFileLinesPerRequest(int maxFileLinesPerRequest) {
+        this.maxFileLinesPerRequest = maxFileLinesPerRequest;
+    }
+
+    /** @return maximum project code search query length */
+    public int getMaxSearchQueryLength() {
+        return maxSearchQueryLength;
+    }
+
+    /** @param maxSearchQueryLength maximum project code search query length */
+    public void setMaxSearchQueryLength(int maxSearchQueryLength) {
+        this.maxSearchQueryLength = maxSearchQueryLength;
     }
 
     /** @return maximum retries for idempotent requests */
@@ -134,7 +173,7 @@ public final class GitLabProperties {
     }
 
     /** @return whether URL and numeric limits are safe */
-    @AssertTrue(message = "GitLab URL must use HTTPS and limits must be positive")
+    @AssertTrue(message = "GitLab URL must use HTTPS and limits must be positive and internally consistent")
     public boolean isValid() {
         if (baseUrl == null || baseUrl.getHost() == null || baseUrl.getRawUserInfo() != null
                 || baseUrl.getQuery() != null || baseUrl.getFragment() != null) {
@@ -146,8 +185,22 @@ public final class GitLabProperties {
                 && readTimeout != null && !readTimeout.isNegative() && !readTimeout.isZero()
                 && maxResponseSize != null && maxResponseSize.toBytes() > 0
                 && maxDiffSize != null && maxDiffSize.toBytes() > 0
+                && maxFileSize != null && maxFileSize.toBytes() > 0
+                && repositoryFileFitsResponseLimit()
                 && maxFiles > 0 && maxFiles <= 10_000
+                && maxFileLinesPerRequest > 0 && maxFileLinesPerRequest <= 5_000
+                && maxSearchQueryLength > 0 && maxSearchQueryLength <= 10_000
                 && maxRetries >= 0 && maxRetries <= 5;
+    }
+
+    private boolean repositoryFileFitsResponseLimit() {
+        long responseBytes = maxResponseSize.toBytes();
+        if (responseBytes <= REPOSITORY_FILE_RESPONSE_OVERHEAD_BYTES) {
+            return false;
+        }
+        long availableBase64Bytes = responseBytes - REPOSITORY_FILE_RESPONSE_OVERHEAD_BYTES;
+        long maximumDecodedBytes = (availableBase64Bytes / 4) * 3;
+        return maxFileSize.toBytes() <= maximumDecodedBytes;
     }
 
     @Override

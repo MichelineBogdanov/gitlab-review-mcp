@@ -14,6 +14,39 @@ record UserDto(long id, String username, String name, @JsonProperty("web_url") S
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
+record ProjectDto(
+        long id,
+        String name,
+        @JsonProperty("name_with_namespace") String nameWithNamespace,
+        String description,
+        @JsonProperty("default_branch") String defaultBranch,
+        Boolean archived,
+        @JsonProperty("empty_repo") Boolean emptyRepo,
+        @JsonProperty("last_activity_at") Instant lastActivityAt) {
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+record RepositoryTreeEntryDto(String id, String name, String type, String path, String mode) {
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+record RepositoryFileDto(
+        @JsonProperty("file_name") String fileName,
+        @JsonProperty("file_path") String filePath,
+        long size,
+        String encoding,
+        String content,
+        String ref,
+        @JsonProperty("blob_id") String blobId,
+        @JsonProperty("commit_id") String commitId,
+        @JsonProperty("last_commit_id") String lastCommitId) {
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+record RepositorySearchResultDto(String path, String ref, @JsonProperty("startline") Integer startLine, String data) {
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
 record MergeRequestDto(
         long iid,
         String title,

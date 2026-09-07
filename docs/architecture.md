@@ -4,14 +4,21 @@
 
 ```mermaid
 flowchart LR
-    Codex[Codex Desktop / CLI] -->|JSON-RPC over STDIO| Mcp[MCP tool adapter]
-    Mcp --> Query[MergeRequestQueryService]
-    Mcp --> Prepare[ReviewPreparationService]
-    Mcp --> Publish[ReviewPublicationService]
+    Codex[Codex Desktop / CLI] -->|JSON-RPC over STDIO| Connection[Connection tools - always]
+    Codex -->|REPOSITORY| RepositoryAdapter[Repository tools]
+    Codex -->|REVIEW| ReviewAdapter[Review tools]
 
-    Query --> GitLabPort[GitLabClient port]
+    RepositoryAdapter --> Repository[RepositoryQueryService]
+    ReviewAdapter --> Query[MergeRequestQueryService]
+    ReviewAdapter --> Prepare[ReviewPreparationService]
+    ReviewAdapter --> Publish[ReviewPublicationService]
+    Connection --> ConnectionService[GitLabConnectionService]
+
+    Repository --> GitLabPort[GitLabClient port]
+    Query --> GitLabPort
     Prepare --> GitLabPort
     Publish --> GitLabPort
+    ConnectionService --> GitLabPort
     Prepare --> ProposalPort[ReviewProposalRepository port]
     Publish --> ProposalPort
 
@@ -22,6 +29,8 @@ flowchart LR
 
     ProposalPort --> Memory[Thread-safe in-memory repository]
 ```
+
+Conditional adapters регистрируют взаимоисключающие tool sets. В `REVIEW` исходный код читает Codex из локального workspace, а MCP работает только с MR API. В `REPOSITORY` `RepositoryQueryService` принимает trusted project URL и читает текущее состояние default branch через Project, Repository Tree, Repository Files и Search API. Локальный checkout не используется; repository content не записывается на диск.
 
 ## Packages
 

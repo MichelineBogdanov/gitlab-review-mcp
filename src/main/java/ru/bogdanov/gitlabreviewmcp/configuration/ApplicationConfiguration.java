@@ -5,6 +5,7 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import javax.net.ssl.SSLContext;
 import org.mapstruct.factory.Mappers;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import ru.bogdanov.gitlabreviewmcp.application.DiffPositionValidator;
@@ -13,13 +14,16 @@ import ru.bogdanov.gitlabreviewmcp.application.MergeRequestQueryService;
 import ru.bogdanov.gitlabreviewmcp.application.ProposalDigestService;
 import ru.bogdanov.gitlabreviewmcp.application.ReviewPreparationService;
 import ru.bogdanov.gitlabreviewmcp.application.ReviewPublicationService;
+import ru.bogdanov.gitlabreviewmcp.application.RepositoryQueryService;
 import ru.bogdanov.gitlabreviewmcp.application.model.ReviewLimits;
 import ru.bogdanov.gitlabreviewmcp.application.port.GitLabClient;
 import ru.bogdanov.gitlabreviewmcp.application.port.MergeRequestReferenceParser;
+import ru.bogdanov.gitlabreviewmcp.application.port.ProjectReferenceParser;
 import ru.bogdanov.gitlabreviewmcp.application.port.ReviewProposalRepository;
 import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.GitLabDtoMapper;
 import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.GitLabHttpTransport;
 import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.GitLabMergeRequestUrlParser;
+import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.GitLabProjectUrlParser;
 import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.JdkGitLabClient;
 import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.JdkGitLabHttpTransport;
 import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.RetryingGitLabHttpTransport;
@@ -67,8 +71,17 @@ public class ApplicationConfiguration {
 
     /** @param properties GitLab settings @return strict merge request parser */
     @Bean
+    @ConditionalOnProperty(
+            prefix = "gitlab-review-mcp", name = "mode", havingValue = "REVIEW", matchIfMissing = true)
     MergeRequestReferenceParser mergeRequestReferenceParser(GitLabProperties properties) {
         return new GitLabMergeRequestUrlParser(properties.getBaseUrl());
+    }
+
+    /** @param properties GitLab settings @return strict project parser */
+    @Bean
+    @ConditionalOnProperty(prefix = "gitlab-review-mcp", name = "mode", havingValue = "REPOSITORY")
+    ProjectReferenceParser projectReferenceParser(GitLabProperties properties) {
+        return new GitLabProjectUrlParser(properties.getBaseUrl());
     }
 
     /** @return GitLab DTO mapper */
@@ -103,6 +116,8 @@ public class ApplicationConfiguration {
 
     /** @return bounded in-memory proposal repository */
     @Bean
+    @ConditionalOnProperty(
+            prefix = "gitlab-review-mcp", name = "mode", havingValue = "REVIEW", matchIfMissing = true)
     ReviewProposalRepository reviewProposalRepository(ReviewProperties properties, Clock clock) {
         return new InMemoryReviewProposalRepository(properties.proposalMaxCount(), clock);
     }
@@ -115,14 +130,27 @@ public class ApplicationConfiguration {
 
     /** @return merge request read service */
     @Bean
+    @ConditionalOnProperty(
+            prefix = "gitlab-review-mcp", name = "mode", havingValue = "REVIEW", matchIfMissing = true)
     MergeRequestQueryService mergeRequestQueryService(
             MergeRequestReferenceParser parser,
             GitLabClient client) {
         return new MergeRequestQueryService(parser, client);
     }
 
+    /** @return remote repository read service */
+    @Bean
+    @ConditionalOnProperty(prefix = "gitlab-review-mcp", name = "mode", havingValue = "REPOSITORY")
+    RepositoryQueryService repositoryQueryService(
+            ProjectReferenceParser parser,
+            GitLabClient client) {
+        return new RepositoryQueryService(parser, client);
+    }
+
     /** @return review preparation service */
     @Bean
+    @ConditionalOnProperty(
+            prefix = "gitlab-review-mcp", name = "mode", havingValue = "REVIEW", matchIfMissing = true)
     ReviewPreparationService reviewPreparationService(
             MergeRequestReferenceParser parser,
             GitLabClient client,
@@ -144,6 +172,8 @@ public class ApplicationConfiguration {
 
     /** @return review publication service */
     @Bean
+    @ConditionalOnProperty(
+            prefix = "gitlab-review-mcp", name = "mode", havingValue = "REVIEW", matchIfMissing = true)
     ReviewPublicationService reviewPublicationService(
             GitLabClient client,
             ReviewProposalRepository repository,

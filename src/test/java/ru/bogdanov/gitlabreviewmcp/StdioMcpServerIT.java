@@ -21,8 +21,8 @@ class StdioMcpServerIT {
     private Path temporaryDirectory;
 
     @Test
-    void initializesListsToolsCallsToolAndKeepsStdoutProtocolOnly() throws Exception {
-        Process process = startConfiguredProcess();
+    void reviewModeExposesOnlyReviewToolsAndKeepsStdoutProtocolOnly() throws Exception {
+        Process process = startConfiguredProcess("REVIEW");
         try (BufferedWriter input = new BufferedWriter(
                         new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
                 BufferedReader output = new BufferedReader(
@@ -48,6 +48,11 @@ class StdioMcpServerIT {
                     "gitlab_get_merge_request_discussions",
                     "gitlab_prepare_review",
                     "gitlab_publish_review");
+            assertThat(tools).doesNotContain(
+                    "gitlab_get_project",
+                    "gitlab_get_repository_tree",
+                    "gitlab_get_repository_file",
+                    "gitlab_search_repository_code");
             assertThat(tools).contains(
                     "\"inputSchema\"",
                     "\"mergeRequestUrl\"",
@@ -67,6 +72,46 @@ class StdioMcpServerIT {
     }
 
     @Test
+    void repositoryModeExposesOnlyRemoteReadTools() throws Exception {
+        Process process = startConfiguredProcess("REPOSITORY");
+        try (BufferedWriter input = new BufferedWriter(
+                        new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
+                BufferedReader output = new BufferedReader(
+                        new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            send(input, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{"
+                    + "\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},"
+                    + "\"clientInfo\":{\"name\":\"integration-test\",\"version\":\"1\"}}}");
+            assertThat(readLine(output)).contains("gitlab-review-mcp");
+
+            send(input, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
+            send(input, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}");
+            String tools = readLine(output);
+            assertThat(tools).contains(
+                    "gitlab_check_connection",
+                    "gitlab_get_project",
+                    "gitlab_get_repository_tree",
+                    "gitlab_get_repository_file",
+                    "gitlab_search_repository_code",
+                    "\"projectUrl\"",
+                    "\"filePath\"",
+                    "\"readOnlyHint\":true");
+            assertThat(tools).doesNotContain(
+                    "gitlab_get_merge_request",
+                    "gitlab_get_merge_request_diff",
+                    "gitlab_get_merge_request_discussions",
+                    "gitlab_prepare_review",
+                    "gitlab_publish_review");
+
+            send(input, "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{"
+                    + "\"name\":\"gitlab_get_project\",\"arguments\":{"
+                    + "\"projectUrl\":\"https://untrusted.example.com/g/p\"}}}");
+            assertThat(readLine(output)).contains("INVALID_PROJECT_URL").doesNotContain("Exception");
+        } finally {
+            stop(process);
+        }
+    }
+
+    @Test
     void exitsWithoutWritingProtocolWhenRequiredConfigurationIsMissing() throws Exception {
         ProcessBuilder builder = processBuilder();
         builder.environment().remove("GITLAB_BASE_URL");
@@ -78,10 +123,24 @@ class StdioMcpServerIT {
         assertThat(new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8)).isBlank();
     }
 
-    private Process startConfiguredProcess() throws IOException {
+    @Test
+    void rejectsUnknownServerModeAtStartup() throws Exception {
         ProcessBuilder builder = processBuilder();
         builder.environment().put("GITLAB_BASE_URL", "https://127.0.0.1:9");
         builder.environment().put("GITLAB_TOKEN", "integration-test-token");
+        builder.environment().put("GITLAB_REVIEW_MCP_MODE", "UNKNOWN");
+        Process process = builder.start();
+
+        assertThat(process.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(process.exitValue()).isNotZero();
+        assertThat(new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8)).isBlank();
+    }
+
+    private Process startConfiguredProcess(String mode) throws IOException {
+        ProcessBuilder builder = processBuilder();
+        builder.environment().put("GITLAB_BASE_URL", "https://127.0.0.1:9");
+        builder.environment().put("GITLAB_TOKEN", "integration-test-token");
+        builder.environment().put("GITLAB_REVIEW_MCP_MODE", mode);
         return builder.start();
     }
 
