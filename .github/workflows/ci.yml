@@ -3,6 +3,7 @@ name: Build and release
 on:
   push:
     branches: ["master"]
+    tags: ["v*.*.*"]
   pull_request:
   workflow_dispatch:
 
@@ -14,6 +15,9 @@ jobs:
     name: Verify and package
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      release_version: ${{ steps.release_metadata.outputs.version }}
+      release_tag: ${{ steps.release_metadata.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,28 +32,59 @@ jobs:
       - name: Verify
         run: mvn --batch-mode --no-transfer-progress clean verify
 
-      - name: Prepare distribution
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      - name: Validate release version
+        id: release_metadata
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          mkdir -p dist/gitlab-review-mcp
-          cp target/gitlab-review-mcp.jar dist/gitlab-review-mcp.jar
-          cp target/gitlab-review-mcp.jar dist/gitlab-review-mcp/gitlab-review-mcp.jar
-          cp .env.example dist/gitlab-review-mcp/.env.example
+          set -euo pipefail
+
+          release_tag="$GITHUB_REF_NAME"
+          if [[ ! "$release_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tag must match vX.Y.Z without leading zeros: $release_tag" >&2
+            exit 1
+          fi
+
+          project_version="$(mvn --quiet --batch-mode --no-transfer-progress \
+            -Dstyle.color=never \
+            -Dexpression=project.version \
+            -DforceStdout \
+            help:evaluate)"
+          if [[ "$release_tag" != "v${project_version}" ]]; then
+            echo "Release tag $release_tag does not match pom.xml version ${project_version}." >&2
+            exit 1
+          fi
+
+          echo "version=${project_version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${release_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare distribution
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release_metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          bundle="gitlab-review-mcp-${RELEASE_VERSION}"
+          mkdir -p "dist/${bundle}"
+          cp target/gitlab-review-mcp.jar "dist/${bundle}.jar"
+          cp target/gitlab-review-mcp.jar "dist/${bundle}/gitlab-review-mcp.jar"
+          cp .env.example "dist/${bundle}/.env.example"
           cp .env.example dist/.env.example
-          cp README.md dist/gitlab-review-mcp/README.md
+          cp README.md "dist/${bundle}/README.md"
           cd dist
-          zip -r gitlab-review-mcp-latest.zip gitlab-review-mcp
-          sha256sum gitlab-review-mcp.jar gitlab-review-mcp-latest.zip .env.example > SHA256SUMS.txt
+          zip -r "${bundle}.zip" "${bundle}"
+          sha256sum "${bundle}.jar" "${bundle}.zip" .env.example > SHA256SUMS.txt
 
       - name: Upload distribution artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: gitlab-review-mcp-distribution
+          name: gitlab-review-mcp-${{ steps.release_metadata.outputs.version }}
           path: |
-            dist/gitlab-review-mcp.jar
-            dist/gitlab-review-mcp-latest.zip
+            dist/gitlab-review-mcp-${{ steps.release_metadata.outputs.version }}.jar
+            dist/gitlab-review-mcp-${{ steps.release_metadata.outputs.version }}.zip
             dist/.env.example
             dist/SHA256SUMS.txt
           include-hidden-files: true
@@ -68,15 +103,15 @@ jobs:
           retention-days: 7
 
   release:
-    name: Update latest release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    name: Publish versioned release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
     concurrency:
-      group: gitlab-review-mcp-latest-release
+      group: gitlab-review-mcp-release-${{ github.ref_name }}
       cancel-in-progress: false
     steps:
       - name: Checkout
@@ -87,65 +122,36 @@ jobs:
       - name: Download distribution artifact
         uses: actions/download-artifact@v4
         with:
-          name: gitlab-review-mcp-distribution
+          name: gitlab-review-mcp-${{ needs.build.outputs.release_version }}
           path: dist
 
-      - name: Update rolling release
+      - name: Publish GitHub release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: latest
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+          RELEASE_VERSION: ${{ needs.build.outputs.release_version }}
         run: |
           set -euo pipefail
 
           git fetch origin "+refs/heads/master:refs/remotes/origin/master"
-          if [[ "$(git rev-parse origin/master)" != "$GITHUB_SHA" ]]; then
-            echo "A newer master commit exists; skipping stale release update."
-            exit 0
+          release_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+          if [[ "$(git rev-parse origin/master)" != "$release_commit" ]]; then
+            echo "Release tag $RELEASE_TAG must point to the current master commit." >&2
+            exit 1
           fi
-
-          if gh release view "$RELEASE_TAG" --json isImmutable >/tmp/release.json 2>/dev/null; then
-            if [[ "$(jq -r '.isImmutable' /tmp/release.json)" == "true" ]]; then
-              echo "The rolling release is immutable. Disable immutable releases or use versioned tags."
-              exit 1
-            fi
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag --force "$RELEASE_TAG" "$GITHUB_SHA"
-          git push --force origin "refs/tags/$RELEASE_TAG"
-
-          short_sha="${GITHUB_SHA:0:7}"
-          repository_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          printf '%s\n' \
-            "Rolling build from [\`${short_sha}\`](${repository_url}/commit/${GITHUB_SHA})." \
-            "" \
-            "Requires Java 21. Download either the standalone JAR or the ZIP bundle." \
-            "Place a configured \`.env\` next to the JAR and use that directory as the MCP \`cwd\`." \
-            "See the bundled README for REVIEW and REPOSITORY mode configuration." \
-            > /tmp/release-notes.md
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release edit "$RELEASE_TAG" \
-              --title "Latest build (${short_sha})" \
-              --notes-file /tmp/release-notes.md \
-              --target "$GITHUB_SHA" \
-              --latest
-            gh release upload "$RELEASE_TAG" \
-              dist/gitlab-review-mcp.jar \
-              dist/gitlab-review-mcp-latest.zip \
-              dist/.env.example \
-              dist/SHA256SUMS.txt \
-              --clobber
-          else
-            gh release create "$RELEASE_TAG" \
-              dist/gitlab-review-mcp.jar \
-              dist/gitlab-review-mcp-latest.zip \
-              dist/.env.example \
-              dist/SHA256SUMS.txt \
-              --verify-tag \
-              --title "Latest build (${short_sha})" \
-              --notes-file /tmp/release-notes.md \
-              --latest
+            echo "Release $RELEASE_TAG already exists; version tags are immutable." >&2
+            exit 1
           fi
+
+          gh release create "$RELEASE_TAG" \
+            "dist/gitlab-review-mcp-${RELEASE_VERSION}.jar" \
+            "dist/gitlab-review-mcp-${RELEASE_VERSION}.zip" \
+            dist/.env.example \
+            dist/SHA256SUMS.txt \
+            --verify-tag \
+            --title "$RELEASE_TAG" \
+            --generate-notes \
+            --latest

@@ -13,7 +13,7 @@
 
     <groupId>ru.bogdanov</groupId>
     <artifactId>gitlab-review-mcp</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <name>GitLab Review MCP Server</name>
     <description>Local MCP server for reviewing merge requests in self-hosted GitLab</description>
 

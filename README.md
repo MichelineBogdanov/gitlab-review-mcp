@@ -73,10 +73,10 @@ Scheme, host, effective port и GitLab URL prefix должны совпадат�
 
 Для запуска достаточно Java 21; Maven на машине пользователя не требуется.
 
-1. Откройте GitHub Release `latest` и скачайте один из вариантов:
-   - `gitlab-review-mcp.jar` и `.env.example` — standalone installation;
-   - `gitlab-review-mcp-latest.zip` — JAR, `.env.example` и README.
-2. Создайте отдельный каталог и поместите в него JAR.
+1. Откройте последний GitHub Release, например `v0.1.0`, и скачайте один из вариантов:
+   - `gitlab-review-mcp-0.1.0.jar` и `.env.example` — standalone installation;
+   - `gitlab-review-mcp-0.1.0.zip` — JAR, `.env.example` и README.
+2. Распакуйте ZIP либо создайте отдельный каталог и переименуйте standalone JAR в `gitlab-review-mcp.jar`, чтобы путь в MCP config не менялся при обновлении.
 3. Скопируйте `.env.example` в `.env` и заполните `gitlab-review-mcp.mode`, `gitlab.base-url` и `gitlab.token`.
 4. Укажите абсолютный путь к JAR в `args`, а созданный каталог — в `cwd` конфигурации MCP.
 5. Перезапустите агент и вызовите `gitlab_check_connection`.
@@ -116,7 +116,7 @@ approval_mode = "prompt"
 Для `REPOSITORY` используйте отдельную read-only конфигурацию из соответствующего раздела ниже. Файл `SHA256SUMS.txt` содержит SHA-256 checksums release assets. Например, JAR можно проверить в PowerShell:
 
 ```powershell
-Get-FileHash .\gitlab-review-mcp.jar -Algorithm SHA256
+Get-FileHash .\gitlab-review-mcp-0.1.0.jar -Algorithm SHA256
 ```
 
 ## Сборка
@@ -135,26 +135,47 @@ target/gitlab-review-mcp.jar
 
 `verify` запускает unit-тесты, WireMock contract tests, ArchUnit, packaged STDIO integration tests, JaCoCo, Javadoc doclint и Checkstyle. Maven Wrapper намеренно не добавлен.
 
-## GitHub Actions и rolling release
+## Версионирование и GitHub Releases
+
+Проект использует [Semantic Versioning](https://semver.org/):
+
+- `vMAJOR.MINOR.PATCH` для Git tag и GitHub Release;
+- `MAJOR.MINOR.PATCH` без префикса `v` в `pom.xml` и MCP server metadata;
+- `PATCH` — обратно совместимое исправление;
+- `MINOR` — новая обратно совместимая функциональность;
+- `MAJOR` — несовместимое изменение публичного MCP API или конфигурации.
+
+Версия в Git tag обязана точно совпадать с версией в `pom.xml`: tag `v0.2.0` публикуется только для Maven version `0.2.0`. Теги и releases не перезаписываются.
 
 Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 - для pull request запускает `mvn clean verify`;
 - при push в `master` собирает и проверяет проект;
-- упаковывает standalone JAR и ZIP bundle;
-- атомарно перемещает tag `latest` на проверенный commit;
-- создаёт release `latest` или обновляет его assets с заменой предыдущих файлов.
+- при push tag вида `vX.Y.Z` повторно проверяет проект и соответствие версии `pom.xml`;
+- публикует versioned standalone JAR, ZIP bundle, `.env.example` и `SHA256SUMS.txt`;
+- создаёт отдельный GitHub Release без перезаписи предыдущих версий и отмечает его как latest.
 
 Release публикуется встроенным `GITHUB_TOKEN`; отдельный PAT или repository secret не требуется. Job публикации имеет только `contents: write`, остальные jobs работают с `contents: read`.
 
-Перед первым push проверьте настройки GitHub repository:
+Перед первым release проверьте настройки GitHub repository:
 
 1. GitHub Actions разрешены в `Settings` → `Actions` → `General`.
 2. Организационная policy не запрещает `contents: write` для `GITHUB_TOKEN`.
-3. Ruleset/tag protection разрешает GitHub Actions перемещать tag `latest`.
-4. Immutable releases отключены: rolling release по определению должен заменять tag и assets.
+3. Ruleset/tag protection разрешает workflow создавать release для tags вида `vX.Y.Z`.
 
-После успешного push в `master` результат появится в `Actions`, а готовые файлы — в release `latest`. Если нужен неизменяемый журнал версий, вместо rolling release следует публиковать отдельные tags вида `v1.2.3`.
+Создание новой версии:
+
+```powershell
+mvn versions:set -DnewVersion=0.2.0 -DgenerateBackupPoms=false
+mvn clean verify
+git add pom.xml
+git commit -m "release: v0.2.0"
+git push origin master
+git tag -a v0.2.0 -m "Release v0.2.0"
+git push origin v0.2.0
+```
+
+Сначала отправляется commit в `master`, затем tag: workflow разрешает release только для tag, указывающего на текущую вершину `master`. Если tag не соответствует строгому формату `vX.Y.Z`, версия отличается от `pom.xml` или release уже существует, публикация завершается ошибкой без перезаписи существующих артефактов.
 
 ## Personal Access Token
 
