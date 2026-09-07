@@ -148,3 +148,4 @@ jobs:
               --title "Latest build (${short_sha})" \
               --notes-file /tmp/release-notes.md \
               --latest
+          fi
