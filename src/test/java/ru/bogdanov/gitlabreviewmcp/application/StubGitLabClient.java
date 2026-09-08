@@ -6,6 +6,7 @@ import ru.bogdanov.gitlabreviewmcp.application.model.DiffFile;
 import ru.bogdanov.gitlabreviewmcp.application.model.DiffVersion;
 import ru.bogdanov.gitlabreviewmcp.application.model.Discussion;
 import ru.bogdanov.gitlabreviewmcp.application.model.GitLabConnectionInfo;
+import ru.bogdanov.gitlabreviewmcp.application.model.GroupProjectSummary;
 import ru.bogdanov.gitlabreviewmcp.application.model.MergeRequestDetails;
 import ru.bogdanov.gitlabreviewmcp.application.model.PageResult;
 import ru.bogdanov.gitlabreviewmcp.application.model.ProjectDetails;
@@ -13,6 +14,7 @@ import ru.bogdanov.gitlabreviewmcp.application.model.RepositoryFileContent;
 import ru.bogdanov.gitlabreviewmcp.application.model.RepositorySearchResult;
 import ru.bogdanov.gitlabreviewmcp.application.model.RepositoryTreeEntry;
 import ru.bogdanov.gitlabreviewmcp.application.port.GitLabClient;
+import ru.bogdanov.gitlabreviewmcp.domain.GroupRef;
 import ru.bogdanov.gitlabreviewmcp.domain.MergeRequestRef;
 import ru.bogdanov.gitlabreviewmcp.domain.ProjectRef;
 import ru.bogdanov.gitlabreviewmcp.domain.PublicationReceipt;
@@ -22,6 +24,12 @@ abstract class StubGitLabClient implements GitLabClient {
 
     @Override
     public GitLabConnectionInfo checkConnection() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public PageResult<GroupProjectSummary> getGroupProjects(
+            GroupRef reference, boolean includeSubgroups, String cursor) {
         throw new UnsupportedOperationException();
     }
 

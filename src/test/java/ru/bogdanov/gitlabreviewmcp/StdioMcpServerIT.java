@@ -49,6 +49,7 @@ class StdioMcpServerIT {
                     "gitlab_prepare_review",
                     "gitlab_publish_review");
             assertThat(tools).doesNotContain(
+                    "gitlab_list_group_projects",
                     "gitlab_get_project",
                     "gitlab_get_repository_tree",
                     "gitlab_get_repository_file",
@@ -88,10 +89,12 @@ class StdioMcpServerIT {
             String tools = readLine(output);
             assertThat(tools).contains(
                     "gitlab_check_connection",
+                    "gitlab_list_group_projects",
                     "gitlab_get_project",
                     "gitlab_get_repository_tree",
                     "gitlab_get_repository_file",
                     "gitlab_search_repository_code",
+                    "\"groupUrl\"",
                     "\"projectUrl\"",
                     "\"filePath\"",
                     "\"readOnlyHint\":true");
@@ -106,6 +109,11 @@ class StdioMcpServerIT {
                     + "\"name\":\"gitlab_get_project\",\"arguments\":{"
                     + "\"projectUrl\":\"https://untrusted.example.com/g/p\"}}}");
             assertThat(readLine(output)).contains("INVALID_PROJECT_URL").doesNotContain("Exception");
+
+            send(input, "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{"
+                    + "\"name\":\"gitlab_list_group_projects\",\"arguments\":{"
+                    + "\"groupUrl\":\"https://untrusted.example.com/g\"}}}");
+            assertThat(readLine(output)).contains("INVALID_GROUP_URL").doesNotContain("Exception");
         } finally {
             stop(process);
         }

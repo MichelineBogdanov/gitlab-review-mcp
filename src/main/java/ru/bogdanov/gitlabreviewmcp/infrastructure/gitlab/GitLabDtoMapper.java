@@ -12,6 +12,7 @@ import ru.bogdanov.gitlabreviewmcp.application.model.Discussion;
 import ru.bogdanov.gitlabreviewmcp.application.model.DiscussionNote;
 import ru.bogdanov.gitlabreviewmcp.application.model.DiscussionPosition;
 import ru.bogdanov.gitlabreviewmcp.application.model.GitLabUser;
+import ru.bogdanov.gitlabreviewmcp.application.model.GroupProjectSummary;
 import ru.bogdanov.gitlabreviewmcp.application.model.MergeRequestDetails;
 import ru.bogdanov.gitlabreviewmcp.application.model.ProjectDetails;
 import ru.bogdanov.gitlabreviewmcp.application.model.RepositoryFileContent;
@@ -53,6 +54,16 @@ public interface GitLabDtoMapper {
     @Mapping(target = "lastActivityAt", source = "value.lastActivityAt")
     @Mapping(target = "gitLabRequestId", source = "requestId")
     ProjectDetails project(ProjectRef reference, ProjectDto value, String requestId);
+
+    /**
+     * Maps a project returned by the group projects API.
+     *
+     * @param value wire DTO
+     * @return group project summary
+     */
+    @Mapping(target = "archived", source = "archived", qualifiedByName = "truth")
+    @Mapping(target = "emptyRepo", source = "emptyRepo", qualifiedByName = "truth")
+    GroupProjectSummary groupProject(ProjectDto value);
 
     /** @param value wire DTO @return repository tree entry */
     RepositoryTreeEntry repositoryTreeEntry(RepositoryTreeEntryDto value);

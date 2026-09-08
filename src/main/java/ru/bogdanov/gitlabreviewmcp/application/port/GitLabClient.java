@@ -6,12 +6,14 @@ import ru.bogdanov.gitlabreviewmcp.application.model.DiffFile;
 import ru.bogdanov.gitlabreviewmcp.application.model.DiffVersion;
 import ru.bogdanov.gitlabreviewmcp.application.model.Discussion;
 import ru.bogdanov.gitlabreviewmcp.application.model.GitLabConnectionInfo;
+import ru.bogdanov.gitlabreviewmcp.application.model.GroupProjectSummary;
 import ru.bogdanov.gitlabreviewmcp.application.model.MergeRequestDetails;
 import ru.bogdanov.gitlabreviewmcp.application.model.PageResult;
 import ru.bogdanov.gitlabreviewmcp.application.model.ProjectDetails;
 import ru.bogdanov.gitlabreviewmcp.application.model.RepositoryFileContent;
 import ru.bogdanov.gitlabreviewmcp.application.model.RepositorySearchResult;
 import ru.bogdanov.gitlabreviewmcp.application.model.RepositoryTreeEntry;
+import ru.bogdanov.gitlabreviewmcp.domain.GroupRef;
 import ru.bogdanov.gitlabreviewmcp.domain.MergeRequestRef;
 import ru.bogdanov.gitlabreviewmcp.domain.ProjectRef;
 import ru.bogdanov.gitlabreviewmcp.domain.PublicationReceipt;
@@ -24,6 +26,17 @@ public interface GitLabClient {
 
     /** @return verified connection information */
     GitLabConnectionInfo checkConnection();
+
+    /**
+     * Returns one page of projects belonging to a group.
+     *
+     * @param reference group reference
+     * @param includeSubgroups whether projects from descendant groups should be included
+     * @param cursor optional pagination cursor
+     * @return group project page
+     */
+    PageResult<GroupProjectSummary> getGroupProjects(
+            GroupRef reference, boolean includeSubgroups, String cursor);
 
     /** @param reference project reference @return current project metadata */
     ProjectDetails getProject(ProjectRef reference);

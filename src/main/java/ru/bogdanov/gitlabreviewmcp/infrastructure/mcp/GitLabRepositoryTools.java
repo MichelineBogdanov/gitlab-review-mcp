@@ -5,6 +5,7 @@ import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import ru.bogdanov.gitlabreviewmcp.application.RepositoryQueryService;
+import ru.bogdanov.gitlabreviewmcp.application.model.GroupProjectSummary;
 import ru.bogdanov.gitlabreviewmcp.application.model.PageResult;
 import ru.bogdanov.gitlabreviewmcp.application.model.ProjectDetails;
 import ru.bogdanov.gitlabreviewmcp.application.model.RepositoryFileContent;
@@ -28,6 +29,31 @@ public final class GitLabRepositoryTools {
     public GitLabRepositoryTools(RepositoryQueryService queryService, McpToolExecutor executor) {
         this.queryService = queryService;
         this.executor = executor;
+    }
+
+    /**
+     * Lists projects belonging to a GitLab group.
+     *
+     * @param groupUrl full group root URL
+     * @param includeSubgroups whether projects from descendant groups should be included
+     * @param cursor optional pagination cursor
+     * @return group project page
+     */
+    @McpTool(
+            name = "gitlab_list_group_projects",
+            description = "Lists one page of projects in a GitLab group and returns project URLs. "
+                    + "Projects shared into the group are excluded. Follow nextCursor until absent.",
+            annotations = @McpTool.McpAnnotations(
+                    readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true))
+    public ToolResponse<PageResult<GroupProjectSummary>> listGroupProjects(
+            @McpToolParam(required = true, description = "Full group root URL on the configured GitLab origin")
+            String groupUrl,
+            @McpToolParam(required = false, description = "Include projects from descendant groups; defaults to true")
+            Boolean includeSubgroups,
+            @McpToolParam(required = false, description = "Opaque cursor from the previous group response")
+            String cursor) {
+        return executor.execute(() -> queryService.listGroupProjects(
+                groupUrl, includeSubgroups == null || includeSubgroups, cursor));
     }
 
     /**

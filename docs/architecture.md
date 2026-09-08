@@ -30,7 +30,7 @@ flowchart LR
     ProposalPort --> Memory[Thread-safe in-memory repository]
 ```
 
-Conditional adapters регистрируют взаимоисключающие tool sets. В `REVIEW` исходный код читает Codex из локального workspace, а MCP работает только с MR API. В `REPOSITORY` `RepositoryQueryService` принимает trusted project URL и читает текущее состояние default branch через Project, Repository Tree, Repository Files и Search API. Локальный checkout не используется; repository content не записывается на диск.
+Conditional adapters регистрируют взаимоисключающие tool sets. В `REVIEW` исходный код читает Codex из локального workspace, а MCP работает только с MR API. В `REPOSITORY` `RepositoryQueryService` принимает trusted group/project URLs, получает состав групп через Groups API и читает текущее состояние default branch через Project, Repository Tree, Repository Files и Search API. Локальный checkout не используется; repository content не записывается на диск.
 
 ## Packages
 

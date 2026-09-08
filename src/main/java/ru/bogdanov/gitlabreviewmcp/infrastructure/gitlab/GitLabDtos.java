@@ -18,10 +18,13 @@ record ProjectDto(
         long id,
         String name,
         @JsonProperty("name_with_namespace") String nameWithNamespace,
+        @JsonProperty("path_with_namespace") String pathWithNamespace,
+        @JsonProperty("web_url") String webUrl,
         String description,
         @JsonProperty("default_branch") String defaultBranch,
         Boolean archived,
         @JsonProperty("empty_repo") Boolean emptyRepo,
+        String visibility,
         @JsonProperty("last_activity_at") Instant lastActivityAt) {
 }
 
