@@ -30,6 +30,7 @@ import ru.bogdanov.gitlabreviewmcp.application.GitLabClientException;
 import ru.bogdanov.gitlabreviewmcp.application.model.DiffVersion;
 import ru.bogdanov.gitlabreviewmcp.configuration.GitLabProperties;
 import ru.bogdanov.gitlabreviewmcp.domain.DiffSide;
+import ru.bogdanov.gitlabreviewmcp.domain.GroupRef;
 import ru.bogdanov.gitlabreviewmcp.domain.InlineReviewComment;
 import ru.bogdanov.gitlabreviewmcp.domain.MergeRequestRef;
 import ru.bogdanov.gitlabreviewmcp.domain.ProjectRef;
@@ -42,6 +43,7 @@ class JdkGitLabClientIntegrationTest {
     private JdkGitLabClient client;
     private MergeRequestRef reference;
     private ProjectRef projectReference;
+    private GroupRef groupReference;
 
     @BeforeEach
     void setUp() {
@@ -71,6 +73,7 @@ class JdkGitLabClientIntegrationTest {
         reference = new MergeRequestRef(
                 URI.create(baseUrl + "/group/project/-/merge_requests/7"), "group/project", 7);
         projectReference = new ProjectRef(URI.create(baseUrl + "/group/project"), "group/project");
+        groupReference = new GroupRef(URI.create(baseUrl + "/group"), "group");
     }
 
     @AfterEach
@@ -157,6 +160,43 @@ class JdkGitLabClientIntegrationTest {
         assertThat(file.gitLabRequestId()).isEqualTo("file-request");
         assertThat(search.items().getFirst().startLine()).isEqualTo(42);
         assertThat(search.items().getFirst().path()).isEqualTo("src/OrderService.java");
+    }
+
+    @Test
+    void listsGroupProjectsWithUrlsAndPagination() {
+        String responseBody = """
+                [{
+                  "id": 8,
+                  "name": "project",
+                  "name_with_namespace": "Group / Project",
+                  "path_with_namespace": "group/project",
+                  "web_url": "http://localhost:%d/group/project",
+                  "description": "Service",
+                  "default_branch": "main",
+                  "archived": false,
+                  "empty_repo": false,
+                  "visibility": "private",
+                  "last_activity_at": "2026-09-01T12:00:00Z",
+                  "future": true
+                }]
+                """.formatted(server.port());
+        server.stubFor(get(urlEqualTo("/api/v4/groups/group/projects?include_subgroups=true"
+                        + "&with_shared=false&simple=true&order_by=path&sort=asc&per_page=100&page=1"))
+                .willReturn(okJson(responseBody)
+                        .withHeader("X-Next-Page", "2")
+                        .withHeader("X-Request-Id", "group-request")));
+
+        var result = client.getGroupProjects(groupReference, true, null);
+
+        assertThat(result.items()).singleElement().satisfies(project -> {
+            assertThat(project.pathWithNamespace()).isEqualTo("group/project");
+            assertThat(project.webUrl()).hasToString("http://localhost:" + server.port() + "/group/project");
+            assertThat(project.defaultBranch()).isEqualTo("main");
+            assertThat(project.visibility()).isEqualTo("private");
+            assertThat(project.archived()).isFalse();
+        });
+        assertThat(result.nextCursor()).isNotBlank();
+        assertThat(result.gitLabRequestId()).isEqualTo("group-request");
     }
 
     @Test

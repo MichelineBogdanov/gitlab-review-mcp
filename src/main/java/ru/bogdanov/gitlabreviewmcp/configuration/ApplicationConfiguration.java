@@ -17,10 +17,12 @@ import ru.bogdanov.gitlabreviewmcp.application.ReviewPublicationService;
 import ru.bogdanov.gitlabreviewmcp.application.RepositoryQueryService;
 import ru.bogdanov.gitlabreviewmcp.application.model.ReviewLimits;
 import ru.bogdanov.gitlabreviewmcp.application.port.GitLabClient;
+import ru.bogdanov.gitlabreviewmcp.application.port.GroupReferenceParser;
 import ru.bogdanov.gitlabreviewmcp.application.port.MergeRequestReferenceParser;
 import ru.bogdanov.gitlabreviewmcp.application.port.ProjectReferenceParser;
 import ru.bogdanov.gitlabreviewmcp.application.port.ReviewProposalRepository;
 import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.GitLabDtoMapper;
+import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.GitLabGroupUrlParser;
 import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.GitLabHttpTransport;
 import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.GitLabMergeRequestUrlParser;
 import ru.bogdanov.gitlabreviewmcp.infrastructure.gitlab.GitLabProjectUrlParser;
@@ -84,6 +86,13 @@ public class ApplicationConfiguration {
         return new GitLabProjectUrlParser(properties.getBaseUrl());
     }
 
+    /** @param properties GitLab settings @return strict group parser */
+    @Bean
+    @ConditionalOnProperty(prefix = "gitlab-review-mcp", name = "mode", havingValue = "REPOSITORY")
+    GroupReferenceParser groupReferenceParser(GitLabProperties properties) {
+        return new GitLabGroupUrlParser(properties.getBaseUrl());
+    }
+
     /** @return GitLab DTO mapper */
     @Bean
     GitLabDtoMapper gitLabDtoMapper() {
@@ -143,8 +152,9 @@ public class ApplicationConfiguration {
     @ConditionalOnProperty(prefix = "gitlab-review-mcp", name = "mode", havingValue = "REPOSITORY")
     RepositoryQueryService repositoryQueryService(
             ProjectReferenceParser parser,
+            GroupReferenceParser groupParser,
             GitLabClient client) {
-        return new RepositoryQueryService(parser, client);
+        return new RepositoryQueryService(parser, groupParser, client);
     }
 
     /** @return review preparation service */

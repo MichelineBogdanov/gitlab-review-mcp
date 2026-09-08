@@ -17,6 +17,7 @@ import ru.bogdanov.gitlabreviewmcp.application.model.DiffFile;
 import ru.bogdanov.gitlabreviewmcp.application.model.DiffVersion;
 import ru.bogdanov.gitlabreviewmcp.application.model.Discussion;
 import ru.bogdanov.gitlabreviewmcp.application.model.GitLabConnectionInfo;
+import ru.bogdanov.gitlabreviewmcp.application.model.GroupProjectSummary;
 import ru.bogdanov.gitlabreviewmcp.application.model.MergeRequestDetails;
 import ru.bogdanov.gitlabreviewmcp.application.model.PageResult;
 import ru.bogdanov.gitlabreviewmcp.application.model.ProjectDetails;
@@ -26,6 +27,7 @@ import ru.bogdanov.gitlabreviewmcp.application.model.RepositoryTreeEntry;
 import ru.bogdanov.gitlabreviewmcp.application.port.GitLabClient;
 import ru.bogdanov.gitlabreviewmcp.configuration.GitLabProperties;
 import ru.bogdanov.gitlabreviewmcp.domain.DiffSide;
+import ru.bogdanov.gitlabreviewmcp.domain.GroupRef;
 import ru.bogdanov.gitlabreviewmcp.domain.InlineReviewComment;
 import ru.bogdanov.gitlabreviewmcp.domain.MergeRequestRef;
 import ru.bogdanov.gitlabreviewmcp.domain.ProjectRef;
@@ -46,6 +48,7 @@ public final class JdkGitLabClient implements GitLabClient {
     private static final TypeReference<List<DiffVersionDto>> VERSION_LIST = new TypeReference<>() { };
     private static final TypeReference<List<DiffFileDto>> DIFF_LIST = new TypeReference<>() { };
     private static final TypeReference<List<DiscussionDto>> DISCUSSION_LIST = new TypeReference<>() { };
+    private static final TypeReference<List<ProjectDto>> PROJECT_LIST = new TypeReference<>() { };
     private static final TypeReference<List<RepositoryTreeEntryDto>> TREE_ENTRY_LIST = new TypeReference<>() { };
     private static final TypeReference<List<RepositorySearchResultDto>> SEARCH_RESULT_LIST = new TypeReference<>() { };
 
@@ -88,6 +91,7 @@ public final class JdkGitLabClient implements GitLabClient {
                 userDto.username(),
                 Set.of(
                         "READ_PROJECT",
+                        "LIST_GROUP_PROJECTS",
                         "READ_REPOSITORY_TREE",
                         "READ_REPOSITORY_FILE",
                         "SEARCH_REPOSITORY_CODE",
@@ -96,6 +100,21 @@ public final class JdkGitLabClient implements GitLabClient {
                         "READ_DISCUSSIONS",
                         "PUBLISH_DISCUSSIONS"),
                 requestId(userResponse));
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public PageResult<GroupProjectSummary> getGroupProjects(
+            GroupRef reference, boolean includeSubgroups, String cursor) {
+        int page = decodeCursor(cursor);
+        String parameters = "include_subgroups=" + includeSubgroups
+                + "&with_shared=false&simple=true&order_by=path&sort=asc"
+                + "&per_page=" + DEFAULT_PAGE_SIZE + "&page=" + page;
+        GitLabHttpResponse response = get(withQuery(groupUri(reference, "/projects"), parameters));
+        List<GroupProjectSummary> projects = read(response, PROJECT_LIST).stream()
+                .map(mapper::groupProject)
+                .toList();
+        return pageResult(projects, response);
     }
 
     /** {@inheritDoc} */
@@ -395,6 +414,10 @@ public final class JdkGitLabClient implements GitLabClient {
 
     private URI projectUri(ProjectRef reference, String suffix) {
         return uri("/projects/" + encode(reference.projectPath()) + suffix);
+    }
+
+    private URI groupUri(GroupRef reference, String suffix) {
+        return uri("/groups/" + encode(reference.groupPath()) + suffix);
     }
 
     private URI uri(String apiPath) {

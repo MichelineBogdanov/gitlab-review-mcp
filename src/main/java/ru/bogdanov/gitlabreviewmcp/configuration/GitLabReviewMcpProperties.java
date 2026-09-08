@@ -34,7 +34,11 @@ public final class GitLabReviewMcpProperties {
 
         /** Read-only project and repository tools backed exclusively by GitLab APIs. */
         REPOSITORY(Set.of(
-                "READ_PROJECT", "READ_REPOSITORY_TREE", "READ_REPOSITORY_FILE", "SEARCH_REPOSITORY_CODE"));
+                "LIST_GROUP_PROJECTS",
+                "READ_PROJECT",
+                "READ_REPOSITORY_TREE",
+                "READ_REPOSITORY_FILE",
+                "SEARCH_REPOSITORY_CODE"));
 
         private final Set<String> capabilities;
 
