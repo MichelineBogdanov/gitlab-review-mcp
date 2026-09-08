@@ -82,9 +82,9 @@ Scheme, host, effective port и GitLab URL prefix должны совпадат�
 
 Для запуска достаточно Java 21; Maven на машине пользователя не требуется.
 
-1. Откройте последний GitHub Release, например `v0.2.0`, и скачайте один из вариантов:
-   - `gitlab-review-mcp-0.2.0.jar` и `.env.example` — standalone installation;
-   - `gitlab-review-mcp-0.2.0.zip` — JAR, `.env.example` и README.
+1. Откройте последний GitHub Release, например `v0.3.0`, и скачайте один из вариантов:
+   - `gitlab-review-mcp-0.3.0.jar` и `.env.example` — standalone installation;
+   - `gitlab-review-mcp-0.3.0.zip` — JAR, `.env.example` и README.
 2. Распакуйте ZIP либо создайте отдельный каталог и переименуйте standalone JAR в `gitlab-review-mcp.jar`, чтобы путь в MCP config не менялся при обновлении.
 3. Скопируйте `.env.example` в `.env` и заполните `gitlab-review-mcp.mode`, `gitlab.base-url` и `gitlab.token`.
 4. Укажите абсолютный путь к JAR в `args`, а созданный каталог — в `cwd` конфигурации MCP.
@@ -125,7 +125,7 @@ approval_mode = "prompt"
 Для `REPOSITORY` используйте отдельную read-only конфигурацию из соответствующего раздела ниже. Файл `SHA256SUMS.txt` содержит SHA-256 checksums release assets. Например, JAR можно проверить в PowerShell:
 
 ```powershell
-Get-FileHash .\gitlab-review-mcp-0.2.0.jar -Algorithm SHA256
+Get-FileHash .\gitlab-review-mcp-0.3.0.jar -Algorithm SHA256
 ```
 
 ## Сборка
@@ -154,7 +154,7 @@ target/gitlab-review-mcp.jar
 - `MINOR` — новая обратно совместимая функциональность;
 - `MAJOR` — несовместимое изменение публичного MCP API или конфигурации.
 
-Версия в Git tag обязана точно совпадать с версией в `pom.xml`: tag `v0.2.0` публикуется только для Maven version `0.2.0`. Теги и releases не перезаписываются.
+Версия в Git tag обязана точно совпадать с версией в `pom.xml`: tag `v0.3.0` публикуется только для Maven version `0.3.0`. Теги и releases не перезаписываются.
 
 Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
@@ -175,13 +175,13 @@ Release публикуется встроенным `GITHUB_TOKEN`; отдель
 Создание новой версии:
 
 ```powershell
-mvn versions:set -DnewVersion=0.2.0 -DgenerateBackupPoms=false
+mvn versions:set -DnewVersion=0.3.0 -DgenerateBackupPoms=false
 mvn clean verify
 git add pom.xml
-git commit -m "release: v0.2.0"
+git commit -m "release: v0.3.0"
 git push origin master
-git tag -a v0.2.0 -m "Release v0.2.0"
-git push origin v0.2.0
+git tag -a v0.3.0 -m "Release v0.3.0"
+git push origin v0.3.0
 ```
 
 Сначала отправляется commit в `master`, затем tag: workflow разрешает release только для tag, указывающего на текущую вершину `master`. Если tag не соответствует строгому формату `vX.Y.Z`, версия отличается от `pom.xml` или release уже существует, публикация завершается ошибкой без перезаписи существующих артефактов.
